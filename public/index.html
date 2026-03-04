@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ScanStock</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body,#root{height:100%;overflow:hidden}
+body{background:#0b0b18;color:#e0e0ee;font-family:-apple-system,'Segoe UI',Roboto,sans-serif}
+input,select{width:100%;padding:13px 14px;border-radius:10px;border:1px solid #2a2a44;background:#0e0e1c;color:#e8e8f0;font-size:16px;outline:none;font-family:monospace}
+select{font-family:inherit;-webkit-appearance:auto;appearance:auto}
+input::placeholder{color:#555}
+button{font-family:inherit}
+.B{display:flex;align-items:center;justify-content:center;gap:7px;padding:13px 16px;border-radius:10px;border:none;font-size:15px;font-weight:600;cursor:pointer}
+.B:active{opacity:.7}
+.BG{background:#00c96a;color:#fff}.BD{background:#1e1e36;color:#c0c0d0}
+.BO{background:transparent;color:#888;border:1px solid #2a2a44}.BR{background:#c62828;color:#fff}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes scanmv{0%,100%{top:20%}50%{top:80%}}
+</style>
+<script type="importmap">
+{"imports":{
+  "preact":"https://cdn.jsdelivr.net/npm/preact@10.19.3/+esm",
+  "preact/hooks":"https://cdn.jsdelivr.net/npm/preact@10.19.3/hooks/+esm",
+  "htm":"https://cdn.jsdelivr.net/npm/htm@3.1.1/+esm"
+}}
+</script>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import{h,render}from"preact";
+import{useState,useEffect,useRef,useCallback,useMemo}from"preact/hooks";
+import htm from"htm";
+const html=htm.bind(h);
+
+/* ═══════════════════════════════════════════
+   API CLIENT
+   ═══════════════════════════════════════════ */
+const API={
+  _t:localStorage.getItem("ss_t")||"",
+  setT(v){this._t=v;localStorage.setItem("ss_t",v)},
+  clr(){this._t="";localStorage.removeItem("ss_t")},
+  async r(m,p,b){
+    const o={method:m,headers:{"Content-Type":"application/json"}};
+    if(this._t)o.headers.Authorization="Bearer "+this._t;
+    if(b)o.body=JSON.stringify(b);
+    const r=await fetch("/api"+p,o),d=await r.json();
+    if(!r.ok)throw new Error(d.error||"Ошибка");return d;
+  },
+  get(p){return this.r("GET",p)},post(p,b){return this.r("POST",p,b)},
+  put(p,b){return this.r("PUT",p,b)},del(p){return this.r("DELETE",p)}
+};
+
+/* ═══════════════════════════════════════════
+   SVG ICON
+   ═══════════════════════════════════════════ */
+function I({d,s=20,c="currentColor"}){
+  return html`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke=${c} stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d=${d}/></svg>`;
+}
+const ic={
+  wh:"M3 21V8l9-5 9 5v13M9 21v-6h6v6",cell:"M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
+  scan:"M7 3H3v4M17 3h4v4M3 17v4h4M21 17v4h-4M8 7v10M12 7v10M16 7v10",plus:"M12 5v14M5 12h14",
+  dl:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
+  ul:"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12",
+  back:"M19 12H5M12 19l-7-7 7-7",del:"M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",
+  kb:"M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M8 14h8",
+  gear:"M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
+  logout:"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
+  user:"M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
+};
+
+/* ═══════════════════════════════════════════
+   BARCODE ANALYZER
+   (mirrors BarcodeAnalyzer.kt architecture)
+   ═══════════════════════════════════════════ */
+
+// Format mapping: our settings key -> BarcodeDetector API format string
+// Format mapping
+const FORMAT_MAP = {
+  all: null,
+  ean_13: "ean_13",
+  ean_8: "ean_8",
+  upc_a: "upc_a",
+  upc_e: "upc_e",
+  data_matrix: "data_matrix",
+  qr_code: "qr_code",
+  code_128: "code_128",
+  code_39: "code_39"
+};
+
+// Форматы по умолчанию
+const ALL_FORMATS = [
+  "ean_13",
+  "ean_8",
+  "upc_a",
+  "upc_e",
+  "code_128",
+  "code_39",
+  "code_93",
+  "itf",
+  "codabar",
+  "qr_code",
+  "pdf417",
+  "aztec",
+  "data_matrix"
+];
+
+class BarcodeAnalyzer {
+  constructor() {
+    this.detector = null;
+    this.isEnabled = true;
+    this.scanThrottleMs = 300;
+    this.duplicateCooldownMs = 2500;
+    this.lastScanTime = 0;
+    this.recentScans = new Map();
+    this.onResult = null;
+    this._polyfillLoaded = false;
+    this.selectedFormat = "all";
+    this.lastCandidate = null;
+    this.confirmCount = 0;
+    this.requiredConfirmations = 3;
+    this.minWidthPercent = 0.25;
+    this.scanAreaPercent = 0.6;
+  }
+
+  async init(format) {
+    this.selectedFormat = format || "all";
+
+    const fmts =
+      this.selectedFormat !== "all"
+        ? [FORMAT_MAP[this.selectedFormat]].filter(Boolean)
+        : ALL_FORMATS;
+
+    // Native BarcodeDetector
+    if ("BarcodeDetector" in window) {
+      try {
+        const supported = await BarcodeDetector.getSupportedFormats();
+        const valid = fmts.filter(f => supported.includes(f));
+
+        if (valid.length > 0) {
+          this.detector = new BarcodeDetector({ formats: valid });
+          console.log("Native detector:", valid);
+          return true;
+        }
+      } catch (e) {
+        console.warn("Native detector failed:", e);
+      }
+    }
+
+    // Polyfill fallback
+    if (!this._polyfillLoaded) {
+      try {
+        const mod = await import("https://cdn.jsdelivr.net/npm/barcode-detector@2/+esm");
+        const Poly = mod.BarcodeDetector || mod.default;
+
+        if (Poly) {
+          this.detector =
+            this.selectedFormat !== "all"
+              ? new Poly({ formats: fmts })
+              : new Poly();
+
+          this._polyfillLoaded = true;
+          console.log("Polyfill detector");
+          return true;
+        }
+      } catch (e) {
+        console.error("Polyfill load failed:", e);
+      }
+    }
+
+    return !!this.detector;
+  }
+
+  setEnabled(v) {
+    this.isEnabled = v;
+    if (!v) this.recentScans.clear();
+  }
+
+  async detect(videoEl) {
+    if (!this.isEnabled || !this.detector) return;
+
+    const now = Date.now();
+    if (now - this.lastScanTime < this.scanThrottleMs) return;
+
+    try {
+      const barcodes = await this.detector.detect(videoEl);
+      if (!barcodes?.length) return;
+
+      let best = null;
+
+      // 🎯 Если выбран конкретный формат — ищем строго его
+      if (this.selectedFormat !== "all") {
+        const wanted = FORMAT_MAP[this.selectedFormat];
+        best = barcodes.find(b => b.format === wanted);
+      } else {
+        // В режиме ALL сначала линейные
+        best =
+          barcodes.find(b =>
+            !["data_matrix", "qr_code", "pdf417", "aztec"].includes(b.format)
+          ) || barcodes[0];
+      }
+
+      if (!best?.rawValue || !best.boundingBox) return;
+
+      const value = best.rawValue.trim();
+      const box = best.boundingBox;
+
+      const videoWidth = videoEl.videoWidth;
+      const videoHeight = videoEl.videoHeight;
+
+      if (!videoWidth || !videoHeight) return;
+
+      // ===============================
+      // 1️⃣ Минимальный размер штрихкода
+      // ===============================
+      if (box.width < videoWidth * this.minWidthPercent) {
+        return;
+      }
+
+      // ===============================
+      // 2️⃣ Центральная зона сканирования
+      // ===============================
+      const centerX = videoWidth / 2;
+      const centerY = videoHeight / 2;
+
+      const scanWidth = videoWidth * this.scanAreaPercent;
+      const scanHeight = videoHeight * this.scanAreaPercent;
+
+      const insideCentralZone =
+        box.x >= centerX - scanWidth / 2 &&
+        box.x + box.width <= centerX + scanWidth / 2 &&
+        box.y >= centerY - scanHeight / 2 &&
+        box.y + box.height <= centerY + scanHeight / 2;
+
+      if (!insideCentralZone) return;
+
+      // ===============================
+      // 3️⃣ Проверка контрольной суммы EAN-13
+      // ===============================
+      if (best.format === "ean_13") {
+        if (!/^\d{13}$/.test(value)) return;
+
+        const digits = value.split("").map(Number);
+        const checkDigit = digits.pop();
+
+        const sum = digits.reduce((acc, num, idx) =>
+          acc + num * (idx % 2 === 0 ? 1 : 3)
+        , 0);
+
+        const calcCheck = (10 - (sum % 10)) % 10;
+
+        if (calcCheck !== checkDigit) return;
+      }
+
+      // ===============================
+      // 4️⃣ Подтверждение 3 одинаковых подряд
+      // ===============================
+      if (this.lastCandidate === value) {
+        this.confirmCount++;
+      } else {
+        this.lastCandidate = value;
+        this.confirmCount = 1;
+      }
+
+      if (this.confirmCount < this.requiredConfirmations) {
+        return;
+      }
+
+      // Сбрасываем подтверждение
+      this.confirmCount = 0;
+      this.lastCandidate = null;
+
+      // ===============================
+      // 5️⃣ Защита от быстрых дублей
+      // ===============================
+      const last = this.recentScans.get(value);
+      if (last && now - last < this.duplicateCooldownMs) return;
+
+      this.lastScanTime = now;
+      this.recentScans.set(value, now);
+
+      // Очистка старых записей (5 мин)
+      const expire = now - 300000;
+      for (const [k, v] of this.recentScans) {
+        if (v < expire) this.recentScans.delete(k);
+      }
+
+      // ===============================
+      // 6️⃣ Отправка результата
+      // ===============================
+      if (this.onResult) {
+        this.onResult({
+          rawValue: value,
+          format: best.format,
+          timestamp: now
+        });
+      }
+
+    } catch (e) {
+      // игнорируем ошибки кадра
+    }
+  }
+
+  destroy() {
+    this.detector = null;
+    this.recentScans.clear();
+  }
+}
+
+
+/* ═══════════════════════════════════════════
+   SOUND MANAGER (mirrors SoundManager)
+   ═══════════════════════════════════════════ */
+const SoundMgr = {
+  _ctx: null,
+  _getCtx() {
+    if(!this._ctx) this._ctx = new (window.AudioContext||window.webkitAudioContext)();
+    return this._ctx;
+  },
+  _beep(freq, dur, type="sine") {
+    try {
+      const ctx = this._getCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.value = 0.15;
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + dur);
+    } catch(e){}
+  },
+  success() { this._beep(1200, 0.12); },
+  warning() { this._beep(600, 0.08); setTimeout(()=>this._beep(600, 0.08), 100); },
+  error() { this._beep(300, 0.15, "square"); setTimeout(()=>this._beep(200, 0.2, "square"), 180); }
+};
+
+/* ═══════════════════════════════════════════
+   SCANNER COMPONENT
+   (mirrors CameraPreview.kt + BarcodeAnalyzer)
+   ═══════════════════════════════════════════ */
+function Scanner({onScan,onClose,format}){
+  const videoRef=useRef(null);
+  const analyzerRef=useRef(null);
+  const [last,setLast]=useState(null);
+  const [count,setCount]=useState(0);
+  const [err,setErr]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [engineType,setEngineType]=useState("");
+  const deadRef=useRef(false);
+  const streamRef=useRef(null);
+
+  // Cooldown tracking (mirrors BarcodeAnalyzer recentScans)
+  const lastCodeRef=useRef("");
+  const lastTimeRef=useRef(0);
+
+  useEffect(()=>{
+    deadRef.current=false;
+    let rafId=0;
+
+    (async()=>{
+      try{
+        // 1. Init analyzer
+        const analyzer = new BarcodeAnalyzer();
+        analyzerRef.current = analyzer;
+        analyzer.scanThrottleMs = 200;
+        analyzer.duplicateCooldownMs = 2500;
+
+        const ok = await analyzer.init(format);
+        if(deadRef.current) return;
+
+        if(!ok) {
+          setErr("Не удалось инициализировать сканер штрих-кодов");
+          setLoading(false);
+          return;
+        }
+
+        setEngineType(("BarcodeDetector" in window) ? "Native ML Kit" : "ZXing WASM");
+
+        // 2. Get camera
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        });
+        if(deadRef.current){stream.getTracks().forEach(t=>t.stop());return}
+        streamRef.current = stream;
+
+        const v = videoRef.current;
+        v.srcObject = stream;
+        await v.play();
+        if(deadRef.current) return;
+        setLoading(false);
+
+        // 3. Scan result handler (mirrors processBarcodes)
+        analyzer.onResult = (result) => {
+          if(deadRef.current) return;
+          const code = result.rawValue;
+          const now = Date.now();
+
+          // Duplicate cooldown: same code 2.5s, any code 600ms
+          if(code===lastCodeRef.current && now-lastTimeRef.current<2500) return;
+          if(now-lastTimeRef.current<600) return;
+
+          lastCodeRef.current = code;
+          lastTimeRef.current = now;
+          setLast(code);
+          setCount(c=>c+1);
+          onScan(code, result.format);
+
+          // Haptic feedback
+          try{navigator.vibrate(80)}catch(e){}
+        };
+
+        // 4. Detection loop (mirrors analyze() in BarcodeAnalyzer.kt)
+        const tick = async () => {
+          if(deadRef.current) return;
+          if(v.readyState >= 2) {
+            await analyzer.detect(v);
+          }
+          rafId = requestAnimationFrame(tick);
+        };
+        rafId = requestAnimationFrame(tick);
+
+      } catch(e) {
+        if(!deadRef.current) {
+          const msg = e.name === "NotAllowedError"
+            ? "Доступ к камере запрещён. Разрешите в настройках браузера."
+            : e.name === "NotFoundError"
+            ? "Камера не найдена"
+            : "Камера: " + e.message;
+          setErr(msg);
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      deadRef.current = true;
+      cancelAnimationFrame(rafId);
+      if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop());
+      if(analyzerRef.current) analyzerRef.current.destroy();
+    };
+  },[format,onScan]);
+
+  return html`
+    <div style=${{position:"fixed",inset:0,zIndex:2000,background:"#000",display:"flex",flexDirection:"column"}}>
+      <div style=${{flex:1,position:"relative",overflow:"hidden"}}>
+        <video ref=${videoRef} style=${{width:"100%",height:"100%",objectFit:"cover"}} playsinline muted/>
+        ${loading&&html`
+          <div style=${{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,.85)",zIndex:5}}>
+            <div style=${{textAlign:"center"}}>
+              <div style=${{width:44,height:44,border:"3px solid #333",borderTopColor:"#00c96a",borderRadius:"50%",margin:"0 auto 14px",animation:"spin .7s linear infinite"}}/>
+              <div style=${{color:"#ddd",fontSize:15}}>Загрузка сканера...</div>
+              <div style=${{color:"#666",fontSize:12,marginTop:4}}>Разрешите доступ к камере</div>
+            </div>
+          </div>
+        `}
+        ${!loading&&!err&&html`
+          <div style=${{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:3}}>
+            <div style=${{width:"72%",maxWidth:300,aspectRatio:"1",borderRadius:14,boxShadow:"0 0 0 4000px rgba(0,0,0,.4)"}}>
+              <div style=${{width:"100%",height:"100%",border:"2px solid rgba(0,255,136,.5)",borderRadius:14,position:"relative",overflow:"hidden"}}>
+                <div style=${{position:"absolute",top:"50%",left:8,right:8,height:2,background:"rgba(0,255,136,.4)",animation:"scanmv 2s ease-in-out infinite"}}/>
+              </div>
+            </div>
+          </div>
+          <div style=${{position:"absolute",top:12,left:12,background:"rgba(0,0,0,.5)",borderRadius:6,padding:"4px 8px",zIndex:4}}>
+            <span style=${{fontSize:10,color:"#0f8",fontFamily:"monospace"}}>${engineType}</span>
+          </div>
+        `}
+      </div>
+      ${last&&html`
+        <div style=${{background:"#0d7a42",color:"#fff",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+          <div style=${{width:28,height:28,borderRadius:"50%",background:"rgba(255,255,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0}}>${count}</div>
+          <div style=${{flex:1,fontFamily:"monospace",fontSize:14,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${last}</div>
+        </div>
+      `}
+      ${err&&html`<div style=${{background:"#c62828",color:"#fff",padding:"16px",textAlign:"center",fontSize:14,flexShrink:0,lineHeight:1.4}}>${err}</div>`}
+      <button onClick=${onClose} style=${{background:"#151530",color:"#eee",border:"none",padding:18,fontSize:16,fontWeight:600,cursor:"pointer",flexShrink:0,borderTop:"1px solid #222"}}>✕ Закрыть сканер</button>
+    </div>
+  `;
+}
+
+/* ═══════════════════════════════════════════
+   UI COMPONENTS
+   ═══════════════════════════════════════════ */
+function Sheet({children,onClose}){
+  return html`<div onClick=${onClose} style=${{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+    <div onClick=${e=>e.stopPropagation()} style=${{background:"#1a1a2e",borderRadius:"20px 20px 0 0",padding:"24px 20px 36px",width:"100%",maxWidth:480,maxHeight:"80vh",overflowY:"auto"}}>${children}</div>
+  </div>`;
+}
+
+function InputSheet({title,placeholder,onSubmit,onClose}){
+  const[v,setV]=useState("");
+  const ref=useRef(null);
+  useEffect(()=>{setTimeout(()=>ref.current?.focus(),150)},[]);
+  const go=()=>{if(v.trim()){onSubmit(v.trim());setV("")}};
+  return html`<${Sheet} onClose=${onClose}>
+    <h3 style=${{margin:"0 0 16px",color:"#fff",fontSize:18}}>${title}</h3>
+    <input ref=${ref} value=${v} onInput=${e=>setV(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")go()}} placeholder=${placeholder}/>
+    <div style=${{display:"flex",gap:8,marginTop:16}}>
+      <button class="B BG" style=${{flex:1}} onClick=${go}>Создать</button>
+      <button class="B BO" style=${{flex:1}} onClick=${onClose}>Отмена</button>
+    </div>
+  <//>`;
+}
+
+function ManualInput({onScan,onClose}){
+  const[v,setV]=useState("");
+  const ref=useRef(null);
+  useEffect(()=>{setTimeout(()=>ref.current?.focus(),150)},[]);
+  const go=()=>{if(v.trim()){onScan(v.trim());setV("");ref.current?.focus()}};
+  return html`
+    <div style=${{position:"fixed",inset:0,zIndex:2000,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style=${{background:"#1a1a2e",borderRadius:16,padding:24,width:"100%",maxWidth:420}}>
+        <h3 style=${{color:"#e8e8f0",margin:"0 0 16px",fontSize:18}}>Ввод баркода</h3>
+        <input ref=${ref} value=${v} onInput=${e=>setV(e.target.value)} onKeyDown=${e=>e.key==="Enter"&&go()} placeholder="Введите баркод..."/>
+        <div style=${{display:"flex",gap:8,marginTop:16}}>
+          <button class="B BG" style=${{flex:1}} onClick=${go}>Добавить</button>
+          <button class="B BO" style=${{flex:1}} onClick=${onClose}>Закрыть</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ═══ Export helpers ═══ */
+async function doExpCSV(){
+  const rows=await API.get("/export");
+  const b="\uFEFFАртикул;Баркод;Ячейка;Время\n"+rows.map(r=>[r.article,r.barcode,r.cell,r.scanned_at].join(";")).join("\n");
+  const u=URL.createObjectURL(new Blob([b],{type:"text/csv;charset=utf-8;"}));
+  Object.assign(document.createElement("a"),{href:u,download:"scanstock.csv"}).click();URL.revokeObjectURL(u);
+}
+async function doExpXLSX(){
+  const rows=await API.get("/export");
+  const X=await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+  const ws=X.utils.aoa_to_sheet([["Артикул","Баркод","Ячейка","Время"],...rows.map(r=>[r.article,r.barcode,r.cell,r.scanned_at])]);
+  ws["!cols"]=[{wch:20},{wch:22},{wch:28},{wch:22}];
+  const wb=X.utils.book_new();X.utils.book_append_sheet(wb,ws,"Сканирования");X.writeFile(wb,"scanstock.xlsx");
+}
+function dlTpl(){
+  const u=URL.createObjectURL(new Blob(["\uFEFFБаркод;Артикул\n4600000000001;ART-001\n"],{type:"text/csv;charset=utf-8;"}));
+  Object.assign(document.createElement("a"),{href:u,download:"template.csv"}).click();URL.revokeObjectURL(u);
+}
+
+/* ═══════════════════════════════════════════
+   AUTH
+   ═══════════════════════════════════════════ */
+function Auth({onDone}){
+  const[mode,setMode]=useState("login");
+  const[user,setUser]=useState("");
+  const[pass,setPass]=useState("");
+  const[err,setErr]=useState("");
+  const[busy,setBusy]=useState(false);
+  const go=async()=>{
+    setErr("");setBusy(true);
+    try{const r=mode==="login"?await API.post("/login",{username:user,password:pass}):await API.post("/register",{username:user,password:pass});API.setT(r.token);onDone(r.username)}catch(e){setErr(e.message)}
+    setBusy(false);
+  };
+  return html`
+    <div style=${{position:"fixed",inset:0,background:"#0b0b18",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style=${{width:"100%",maxWidth:380}}>
+        <div style=${{textAlign:"center",marginBottom:32}}>
+          <div style=${{width:56,height:56,borderRadius:14,background:"linear-gradient(135deg,#00c96a,#00a5ff)",display:"inline-flex",alignItems:"center",justifyContent:"center",marginBottom:12}}><${I} d=${ic.scan} s=${26} c="#fff"/></div>
+          <h1 style=${{color:"#fff",fontSize:24,fontWeight:800,margin:"0 0 4px"}}>ScanStock</h1>
+          <p style=${{color:"#666",fontSize:13}}>Инвентаризация складов</p>
+        </div>
+        <div style=${{display:"flex",marginBottom:20,background:"#141428",borderRadius:10,padding:3}}>
+          ${["login","register"].map(m=>html`<button key=${m} onClick=${()=>{setMode(m);setErr("")}} style=${{flex:1,padding:10,borderRadius:8,border:"none",fontSize:14,fontWeight:600,cursor:"pointer",background:mode===m?"#1e1e36":"transparent",color:mode===m?"#fff":"#666"}}>${m==="login"?"Вход":"Регистрация"}</button>`)}
+        </div>
+        <div style=${{display:"flex",flexDirection:"column",gap:12}}>
+          <input value=${user} onInput=${e=>setUser(e.target.value)} placeholder="Логин" onKeyDown=${e=>e.key==="Enter"&&go()}/>
+          <input type="password" value=${pass} onInput=${e=>setPass(e.target.value)} placeholder="Пароль" onKeyDown=${e=>e.key==="Enter"&&go()}/>
+          ${err&&html`<div style=${{color:"#ef5350",fontSize:13}}>${err}</div>`}
+          <button class="B BG" style=${{padding:14,fontSize:16}} onClick=${go} disabled=${busy}>${busy?"...":(mode==="login"?"Войти":"Создать аккаунт")}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ═══════════════════════════════════════════
+   MAIN APP
+   ═══════════════════════════════════════════ */
+function Main({username,onLogout}){
+  const[pg,setPg]=useState("home");
+  const[whs,setWhs]=useState([]);
+  const[cls,setCls]=useState([]);
+  const[its,setIts]=useState([]);
+  const[arts,setArts]=useState([]);
+  const[fmt,setFmt]=useState("all");
+  const[wid,setWid]=useState(null);
+  const[cid,setCid]=useState(null);
+  const[wnm,setWnm]=useState("");
+  const[cnm,setCnm]=useState("");
+  const[scn,setScn]=useState(false);
+  const[man,setMan]=useState(false);
+  const[sht,setSht]=useState(null);
+  const fRef=useRef(null);
+
+  const ldW=async()=>{try{setWhs(await API.get("/warehouses"))}catch{}};
+  const ldC=async id=>{try{setCls(await API.get("/warehouses/"+id+"/cells"))}catch{}};
+  const ldI=async id=>{try{setIts(await API.get("/cells/"+id+"/items"))}catch{}};
+  const ldA=async()=>{try{setArts(await API.get("/articles"))}catch{}};
+  const ldF=async()=>{try{const s=await API.get("/settings");setFmt(s.barcode_format||"all")}catch{}};
+
+  useEffect(()=>{ldW();ldF()},[]);
+
+  const goH=()=>{setPg("home");setWid(null);setCid(null);ldW()};
+  const goW=(id,nm)=>{setPg("wh");setWid(id);setWnm(nm);setCid(null);ldC(id)};
+  const goC=(id,nm)=>{setPg("cell");setCid(id);setCnm(nm);ldI(id)};
+  const goB=()=>pg==="cell"?goW(wid,wnm):goH();
+
+  const addW=async n=>{await API.post("/warehouses",{name:n});setSht(null);ldW()};
+  const delW=async(id,nm)=>{if(!confirm("Удалить «"+nm+"»?"))return;await API.del("/warehouses/"+id);ldW()};
+  const addC=async n=>{await API.post("/warehouses/"+wid+"/cells",{name:n});setSht(null);ldC(wid)};
+  const delC=async(id,nm)=>{if(!confirm("Удалить «"+nm+"»?"))return;await API.del("/cells/"+id);ldC(wid)};
+
+  const cidRef=useRef(cid);cidRef.current=cid;
+  const doScan=useCallback(async(bc)=>{
+    const id=cidRef.current;if(!id)return;
+    SoundMgr.success();
+    await API.post("/cells/"+id+"/scan",{barcode:bc});
+    ldI(id);
+  },[]);
+
+  const delIt=async bc=>{await API.del("/cells/"+cid+"/items/"+encodeURIComponent(bc));ldI(cid)};
+  const adjQ=async(bc,d)=>{await API.post("/cells/"+cid+"/items/"+encodeURIComponent(bc)+"/adjust",{delta:d});ldI(cid)};
+
+  const upArt=async e=>{
+    const f=e.target.files?.[0];if(!f)return;
+    const t=await f.text();const ls=t.split(/\r?\n/).filter(l=>l.trim());
+    const items=[];
+    for(let i=1;i<ls.length;i++){const p=ls[i].split(/[;,\t]/);if(p.length>=2&&p[0].trim()&&p[1].trim())items.push({barcode:p[0].trim(),article:p[1].trim()})}
+    if(items.length)await API.post("/articles/upload",{items});
+    ldA();e.target.value="";
+  };
+  const savF=async f=>{setFmt(f);await API.put("/settings",{barcode_format:f})};
+  const reset=async()=>{if(!confirm("Удалить ВСЕ?"))return;await API.del("/data");goH()};
+
+  const isH=pg==="home",isW=pg==="wh",isC=pg==="cell",isS=pg==="settings",isE=pg==="export",isA=pg==="articles";
+  const ttl=isH?"ScanStock":isW?wnm:isC?cnm:isS?"Настройки":isE?"Экспорт":"Артикулы";
+  const sub=isH?username:isW?cls.length+" яч.":isC?wnm:null;
+  const tS=whs.reduce((a,w)=>a+(w.scanCount||0),0);
+  const tC=whs.reduce((a,w)=>a+(w.cellCount||0),0);
+  const cQ=its.reduce((a,i)=>a+i.qty,0);
+
+  return html`
+    <div style=${{position:"fixed",inset:0,display:"flex",flexDirection:"column",background:"#0b0b18",color:"#e0e0ee",overflow:"hidden"}}>
+      <div style=${{background:"#111125",borderBottom:"1px solid #1e1e38",padding:"12px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        ${!isH&&html`<button onClick=${goB} style=${{background:"none",border:"none",color:"#888",cursor:"pointer",padding:4,display:"flex"}}><${I} d=${ic.back} s=${22}/></button>`}
+        ${isH&&html`<div style=${{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#00c96a,#00a5ff)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><${I} d=${ic.scan} s=${16} c="#fff"/></div>`}
+        <div style=${{flex:1,minWidth:0}}>
+          <div style=${{fontSize:17,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${ttl}</div>
+          ${sub&&html`<div style=${{fontSize:11,color:"#666"}}>${sub}</div>`}
+        </div>
+        ${isC&&html`<span style=${{background:"#00c96a22",color:"#00c96a",padding:"3px 10px",borderRadius:8,fontSize:13,fontWeight:700,flexShrink:0}}>${cQ} шт.</span>`}
+        ${isH&&html`<button onClick=${()=>{setPg("settings");ldF()}} style=${{background:"none",border:"none",color:"#666",cursor:"pointer",padding:4,display:"flex"}}><${I} d=${ic.gear} s=${20}/></button>`}
+      </div>
+
+      <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:16}}>
+
+        ${isH&&html`
+          <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
+            ${[{l:"Склады",v:whs.length},{l:"Ячейки",v:tC},{l:"Сканов",v:tS}].map(s=>html`<div key=${s.l} style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:12,padding:"14px 8px",textAlign:"center"}}><div style=${{fontSize:26,fontWeight:800,color:"#fff",fontFamily:"monospace"}}>${s.v}</div><div style=${{fontSize:10,color:"#666",textTransform:"uppercase",letterSpacing:".08em",marginTop:2}}>${s.l}</div></div>`)}
+          </div>
+          <div style=${{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:20}}>
+            <button class="B BD" onClick=${()=>{setPg("articles");ldA()}}><${I} d=${ic.ul} s=${16}/> Артикулы</button>
+            <button class="B BD" onClick=${()=>setPg("export")}><${I} d=${ic.dl} s=${16}/> Экспорт</button>
+          </div>
+          <div style=${{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <span style=${{fontSize:12,color:"#666",textTransform:"uppercase",letterSpacing:".1em",fontWeight:600}}>Склады</span>
+            <button class="B BG" style=${{padding:"6px 14px",fontSize:13}} onClick=${()=>setSht("wh")}><${I} d=${ic.plus} s=${14}/> Добавить</button>
+          </div>
+          ${whs.length===0?html`<div style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:14,padding:"48px 24px",textAlign:"center"}}><div style=${{fontSize:42,marginBottom:10}}>📦</div><div style=${{color:"#555",fontSize:15}}>Создайте первый склад</div></div>`
+          :whs.map(w=>html`<div key=${w.id} onClick=${()=>goW(w.id,w.name)} style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:12,padding:"14px 16px",marginBottom:8,cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+            <div style=${{width:44,height:44,borderRadius:11,background:"#1a1a34",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><${I} d=${ic.wh} s=${20} c="#00c96a"/></div>
+            <div style=${{flex:1,minWidth:0}}><div style=${{fontWeight:700,fontSize:16,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${w.name}</div><div style=${{fontSize:12,color:"#666"}}>${w.cellCount||0} яч. · ${w.scanCount||0} сканов</div></div>
+            <button onClick=${e=>{e.stopPropagation();delW(w.id,w.name)}} style=${{background:"none",border:"none",color:"#444",cursor:"pointer",padding:6,display:"flex"}}><${I} d=${ic.del} s=${16}/></button>
+          </div>`)}
+        `}
+
+        ${isW&&html`
+          <div style=${{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <span style=${{fontSize:12,color:"#666",textTransform:"uppercase",letterSpacing:".1em",fontWeight:600}}>Ячейки</span>
+            <button class="B BG" style=${{padding:"6px 14px",fontSize:13}} onClick=${()=>setSht("cl")}><${I} d=${ic.plus} s=${14}/> Добавить</button>
+          </div>
+          ${cls.length===0?html`<div style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:14,padding:"48px 24px",textAlign:"center"}}><div style=${{fontSize:42,marginBottom:10}}>📋</div><div style=${{color:"#555",fontSize:15}}>Создайте первую ячейку</div></div>`
+          :cls.map(c=>html`<div key=${c.id} onClick=${()=>goC(c.id,c.name)} style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:12,padding:"14px 16px",marginBottom:8,cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+            <div style=${{width:44,height:44,borderRadius:11,background:"#1a1a34",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><${I} d=${ic.cell} s=${20} c="#00a5ff"/></div>
+            <div style=${{flex:1,minWidth:0}}><div style=${{fontWeight:700,fontSize:16,color:"#fff"}}>${c.name}</div><div style=${{fontSize:12,color:"#666"}}>${c.itemCount||0} поз. · ${c.scanCount||0} шт.</div></div>
+            <button onClick=${e=>{e.stopPropagation();delC(c.id,c.name)}} style=${{background:"none",border:"none",color:"#444",cursor:"pointer",padding:6,display:"flex"}}><${I} d=${ic.del} s=${16}/></button>
+          </div>`)}
+        `}
+
+        ${isC&&html`
+          ${its.length===0?html`<div style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:14,padding:"48px 24px",textAlign:"center"}}><div style=${{fontSize:42,marginBottom:10}}>📷</div><div style=${{color:"#555",fontSize:15}}>Нажмите «Сканировать»</div></div>`
+          :its.map(it=>html`<div key=${it.barcode} style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:12,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+            <div style=${{flex:1,minWidth:0}}><div style=${{fontWeight:700,fontSize:15,color:"#e8e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${it.article||"—"}</div><div style=${{fontFamily:"monospace",fontSize:11,color:"#555",letterSpacing:".04em",marginTop:1}}>${it.barcode}</div></div>
+            <div style=${{display:"flex",alignItems:"center",gap:3,flexShrink:0}}>
+              <button onClick=${()=>adjQ(it.barcode,-1)} style=${{width:34,height:34,borderRadius:8,border:"1px solid #2a2a44",background:"transparent",color:"#999",cursor:"pointer",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+              <span style=${{minWidth:36,textAlign:"center",fontWeight:800,fontSize:18,fontFamily:"monospace",color:"#fff"}}>${it.qty}</span>
+              <button onClick=${()=>adjQ(it.barcode,1)} style=${{width:34,height:34,borderRadius:8,border:"1px solid #2a2a44",background:"transparent",color:"#999",cursor:"pointer",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+            </div>
+            <button onClick=${()=>delIt(it.barcode)} style=${{background:"none",border:"none",color:"#444",cursor:"pointer",padding:4,display:"flex",flexShrink:0}}><${I} d=${ic.del} s=${16}/></button>
+          </div>`)}
+        `}
+
+        ${isS&&html`
+          <div style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:12,padding:16,marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+            <div style=${{width:44,height:44,borderRadius:"50%",background:"#1e1e36",display:"flex",alignItems:"center",justifyContent:"center"}}><${I} d=${ic.user} s=${20} c="#00c96a"/></div>
+            <div><div style=${{fontWeight:700,color:"#fff",fontSize:16}}>${username}</div><div style=${{fontSize:12,color:"#666"}}>Серверная авторизация</div></div>
+          </div>
+          <label style=${{fontSize:13,color:"#888",display:"block",marginBottom:6}}>Формат баркода</label>
+          <select value=${fmt} onChange=${e=>savF(e.target.value)} style=${{marginBottom:16}}>
+            ${[["all","Все форматы"],["ean_13","EAN-13"],["ean_8","EAN-8"],["upc_a","UPC-A"],["upc_e","UPC-E"],["data_matrix","DataMatrix"],["qr_code","QR Code"],["code_128","Code 128"],["code_39","Code 39"]].map(([v,l])=>html`<option key=${v} value=${v}>${l}</option>`)}
+          </select>
+          <button class="B BD" style=${{width:"100%",marginBottom:8}} onClick=${()=>{setPg("articles");ldA()}}><${I} d=${ic.ul} s=${16}/> Таблица артикулов</button>
+          <button class="B BR" style=${{width:"100%",marginBottom:8}} onClick=${reset}><${I} d=${ic.del} s=${16}/> Удалить все данные</button>
+          <button class="B BO" style=${{width:"100%"}} onClick=${onLogout}><${I} d=${ic.logout} s=${16}/> Выйти</button>
+        `}
+
+        ${isE&&html`
+          <p style=${{color:"#777",fontSize:14,margin:"0 0 20px"}}>Артикул · Баркод · Ячейка · Время</p>
+          <div style=${{display:"flex",flexDirection:"column",gap:10}}>
+            <button class="B BG" style=${{width:"100%",padding:16}} onClick=${doExpXLSX}><${I} d=${ic.dl} s=${18}/> Скачать XLSX</button>
+            <button class="B BD" style=${{width:"100%",padding:16}} onClick=${doExpCSV}><${I} d=${ic.dl} s=${18}/> Скачать CSV</button>
+          </div>
+        `}
+
+        ${isA&&html`
+          <p style=${{color:"#777",fontSize:14,margin:"0 0 16px"}}>CSV: <code style=${{color:"#00c96a"}}>Баркод;Артикул</code></p>
+          ${arts.length>0&&html`<div style=${{background:"#00c96a15",border:"1px solid #00c96a33",borderRadius:10,padding:"12px 14px",marginBottom:14,fontSize:14,color:"#00c96a"}}>Загружено: ${arts.length} артикулов</div>`}
+          <button class="B BO" style=${{width:"100%",marginBottom:10}} onClick=${dlTpl}>Скачать шаблон CSV</button>
+          <input ref=${fRef} type="file" accept=".csv,.txt,.tsv" style=${{display:"none"}} onChange=${upArt}/>
+          <button class="B BG" style=${{width:"100%"}} onClick=${()=>fRef.current?.click()}><${I} d=${ic.ul} s=${16}/> Загрузить файл</button>
+          ${arts.length>0&&html`<div style=${{marginTop:20}}>
+            <div style=${{fontSize:12,color:"#666",textTransform:"uppercase",letterSpacing:".1em",fontWeight:600,marginBottom:8}}>Загруженные</div>
+            <div style=${{background:"#141428",border:"1px solid #1e1e38",borderRadius:12,maxHeight:300,overflowY:"auto"}}>
+              ${arts.slice(0,50).map(a=>html`<div key=${a.barcode} style=${{padding:"10px 14px",borderBottom:"1px solid #1a1a30",display:"flex",justifyContent:"space-between"}}><span style=${{fontWeight:600,color:"#ddd",fontSize:14}}>${a.article}</span><span style=${{fontFamily:"monospace",fontSize:11,color:"#555"}}>${a.barcode}</span></div>`)}
+            </div>
+          </div>`}
+        `}
+      </div>
+
+      ${isC&&html`<div style=${{padding:"12px 16px",borderTop:"1px solid #1e1e38",background:"#111125",display:"flex",gap:8,flexShrink:0}}>
+        <button class="B BG" style=${{flex:1,padding:"15px 16px",fontSize:16}} onClick=${()=>setScn(true)}><${I} d=${ic.scan} s=${18}/> Сканировать</button>
+        <button class="B BD" style=${{padding:"15px 18px"}} onClick=${()=>setMan(true)}><${I} d=${ic.kb} s=${18}/></button>
+      </div>`}
+
+      ${scn&&html`<${Scanner} format=${fmt} onScan=${doScan} onClose=${()=>setScn(false)}/>`}
+      ${man&&html`<${ManualInput} onScan=${doScan} onClose=${()=>setMan(false)}/>`}
+      ${sht==="wh"&&html`<${InputSheet} title="Новый склад" placeholder="Название склада..." onSubmit=${addW} onClose=${()=>setSht(null)}/>`}
+      ${sht==="cl"&&html`<${InputSheet} title="Новая ячейка" placeholder="Название ячейки..." onSubmit=${addC} onClose=${()=>setSht(null)}/>`}
+    </div>
+  `;
+}
+
+/* ═══════════════════════════════════════════
+   ROOT
+   ═══════════════════════════════════════════ */
+function App(){
+  const[user,setUser]=useState(null);
+  const[loading,setLoading]=useState(true);
+  useEffect(()=>{
+    if(API._t){API.get("/me").then(r=>setUser(r.username)).catch(()=>API.clr()).finally(()=>setLoading(false))}
+    else setLoading(false);
+  },[]);
+  const logout=()=>{API.clr();setUser(null)};
+  if(loading)return html`<div style=${{position:"fixed",inset:0,background:"#0b0b18",display:"flex",alignItems:"center",justifyContent:"center"}}><div style=${{width:44,height:44,border:"3px solid #222",borderTopColor:"#00c96a",borderRadius:"50%",animation:"spin .7s linear infinite"}}/></div>`;
+  if(!user)return html`<${Auth} onDone=${setUser}/>`;
+  return html`<${Main} username=${user} onLogout=${logout}/>`;
+}
+
+render(html`<${App}/>`,document.getElementById("root"));
+</script>
+</body>
+</html>
