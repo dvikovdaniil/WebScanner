@@ -126,14 +126,14 @@ const ic={
 */
 function parseKI(raw){
   if(!raw||raw.length<31)return null;
-  // Handle GS1 format: may have \x1d separators or FNC1
   const clean=raw.replace(/[\x1d\x00]/g,"");
-  // Must start with 01 + 14digit GTIN + 21 + serial
   const m=clean.match(/^01(\d{14})21(.{13})/);
   if(!m)return null;
-  return{gtin:m[1],serial:m[2],ki:clean.substring(0,31)};
+  const gtin14=m[1];
+  // GTIN-14 с ведущим 0 → EAN-13 (убираем первый 0)
+  const barcode=gtin14.startsWith("0")?gtin14.substring(1):gtin14;
+  return{gtin:barcode,serial:m[2],ki:clean.substring(0,31)};
 }
-
 /* ═══ BARCODE ANALYZER ═══ */
 const FORMAT_MAP={all:null,ean_13:"ean_13",ean_8:"ean_8",upc_a:"upc_a",upc_e:"upc_e",data_matrix:"data_matrix",qr_code:"qr_code",code_128:"code_128",code_39:"code_39"};
 const ALL_FORMATS=["ean_13","ean_8","upc_a","upc_e","code_128","code_39","code_93","itf","codabar","qr_code","pdf417","aztec","data_matrix"];
