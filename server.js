@@ -9,21 +9,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "scanstock-k8x2m9pLwQz7vR4nJ6bY3cT0";
 
-// ═══════════════════════════════════════════
-// Database setup (persistent in /data)
-// ═══════════════════════════════════════════
 const fs = require("fs");
-
-// Папка data рядом с сервером
 const DB_DIR = path.join(__dirname, "data");
 const DB_PATH = path.join(DB_DIR, "scanstock.db");
 
-// Создаём папку если её нет
 if (!fs.existsSync(DB_DIR)) {
   fs.mkdirSync(DB_DIR, { recursive: true });
   console.log("📁 Создана папка data");
 }
-
 console.log("📦 База данных:", DB_PATH);
 
 const db = new Database(DB_PATH);
@@ -37,7 +30,6 @@ db.exec(`
     password_hash TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
   );
-
   CREATE TABLE IF NOT EXISTS warehouses (
     id TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL,
@@ -45,7 +37,6 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
-
   CREATE TABLE IF NOT EXISTS cells (
     id TEXT PRIMARY KEY,
     warehouse_id TEXT NOT NULL,
@@ -55,7 +46,6 @@ db.exec(`
     FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
-
   CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cell_id TEXT NOT NULL,
@@ -66,7 +56,6 @@ db.exec(`
     FOREIGN KEY (cell_id) REFERENCES cells(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
-
   CREATE TABLE IF NOT EXISTS articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -75,7 +64,6 @@ db.exec(`
     UNIQUE(user_id, barcode),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
-
   CREATE TABLE IF NOT EXISTS settings (
     user_id INTEGER PRIMARY KEY,
     barcode_format TEXT DEFAULT 'all',
@@ -83,25 +71,21 @@ db.exec(`
   );
 `);
 
-// Prepared statements
 const stmts = {
-  // Users
   createUser: db.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)"),
   findUser: db.prepare("SELECT * FROM users WHERE username = ?"),
 
-  // Warehouses
   getWarehouses: db.prepare("SELECT * FROM warehouses WHERE user_id = ? ORDER BY created_at"),
   createWarehouse: db.prepare("INSERT INTO warehouses (id, user_id, name) VALUES (?, ?, ?)"),
   deleteWarehouse: db.prepare("DELETE FROM warehouses WHERE id = ? AND user_id = ?"),
   renameWarehouse: db.prepare("UPDATE warehouses SET name = ? WHERE id = ? AND user_id = ?"),
 
-  // Cells
   getCells: db.prepare("SELECT * FROM cells WHERE warehouse_id = ? AND user_id = ? ORDER BY created_at"),
   createCell: db.prepare("INSERT INTO cells (id, warehouse_id, user_id, name) VALUES (?, ?, ?, ?)"),
   deleteCell: db.prepare("DELETE FROM cells WHERE id = ? AND user_id = ?"),
   getCell: db.prepare("SELECT * FROM cells WHERE id = ? AND user_id = ?"),
+  renameCell: db.prepare("UPDATE cells SET name = ? WHERE id = ? AND user_id = ?"),
 
-  // Scans
   getScans: db.prepare("SELECT * FROM scans WHERE cell_id = ? AND user_id = ? ORDER BY scanned_at DESC"),
   addScan: db.prepare("INSERT INTO scans (cell_id, user_id, barcode, article, scanned_at) VALUES (?, ?, ?, ?, ?)"),
   deleteScansByBarcode: db.prepare("DELETE FROM scans WHERE cell_id = ? AND user_id = ? AND barcode = ?"),
@@ -111,22 +95,22 @@ const stmts = {
     )
   `),
 
-  // Articles
   getArticles: db.prepare("SELECT * FROM articles WHERE user_id = ?"),
   upsertArticle: db.prepare("INSERT INTO articles (user_id, barcode, article) VALUES (?, ?, ?) ON CONFLICT(user_id, barcode) DO UPDATE SET article = excluded.article"),
   getArticle: db.prepare("SELECT article FROM articles WHERE user_id = ? AND barcode = ?"),
+  getArticleByName: db.prepare("SELECT barcode, article FROM articles WHERE user_id = ? AND article = ?"),
+  searchArticles: db.prepare("SELECT * FROM articles WHERE user_id = ? AND (article LIKE ? OR barcode LIKE ?) LIMIT 50"),
   deleteArticles: db.prepare("DELETE FROM articles WHERE user_id = ?"),
 
-  // Settings
   getSettings: db.prepare("SELECT * FROM settings WHERE user_id = ?"),
   upsertSettings: db.prepare("INSERT INTO settings (user_id, barcode_format) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET barcode_format = excluded.barcode_format"),
 
-  // Export
   exportAll: db.prepare(`
     SELECT
       COALESCE(a.article, s.article, '') as article,
       s.barcode,
-      w.name || ' / ' || c.name as cell,
+      w.name as warehouse,
+      c.name as cell,
       s.scanned_at
     FROM scans s
     JOIN cells c ON s.cell_id = c.id
@@ -136,18 +120,13 @@ const stmts = {
     ORDER BY s.scanned_at DESC
   `),
 
-  // Nuke
   deleteAllData: db.prepare("DELETE FROM warehouses WHERE user_id = ?"),
 };
 
-// ═══════════════════════════════════════════
-// Middleware
-// ═══════════════════════════════════════════
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Auth middleware
 function auth(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) return res.status(401).json({ error: "Необходима авторизация" });
@@ -165,15 +144,12 @@ function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
-// ═══════════════════════════════════════════
-// AUTH routes
-// ═══════════════════════════════════════════
+// ═══ AUTH ═══
 app.post("/api/register", (req, res) => {
   const { username, password } = req.body;
   if (!username?.trim() || !password?.trim()) return res.status(400).json({ error: "Заполните все поля" });
   if (password.length < 4) return res.status(400).json({ error: "Пароль от 4 символов" });
   if (stmts.findUser.get(username.trim())) return res.status(409).json({ error: "Пользователь уже существует" });
-
   const hash = bcrypt.hashSync(password, 10);
   const result = stmts.createUser.run(username.trim(), hash);
   const token = jwt.sign({ id: result.lastInsertRowid, username: username.trim() }, JWT_SECRET, { expiresIn: "30d" });
@@ -185,7 +161,6 @@ app.post("/api/login", (req, res) => {
   const user = stmts.findUser.get(username?.trim());
   if (!user) return res.status(401).json({ error: "Пользователь не найден" });
   if (!bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: "Неверный пароль" });
-
   const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: "30d" });
   res.json({ token, username: user.username });
 });
@@ -194,12 +169,9 @@ app.get("/api/me", auth, (req, res) => {
   res.json({ username: req.username });
 });
 
-// ═══════════════════════════════════════════
-// WAREHOUSES
-// ═══════════════════════════════════════════
+// ═══ WAREHOUSES ═══
 app.get("/api/warehouses", auth, (req, res) => {
   const warehouses = stmts.getWarehouses.all(req.userId);
-  // Add cell count and scan count
   const result = warehouses.map(w => {
     const cells = stmts.getCells.all(w.id, req.userId);
     let scanCount = 0;
@@ -217,14 +189,19 @@ app.post("/api/warehouses", auth, (req, res) => {
   res.json({ id, name: name.trim() });
 });
 
+app.put("/api/warehouses/:id", auth, (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "Укажите название" });
+  stmts.renameWarehouse.run(name.trim(), req.params.id, req.userId);
+  res.json({ ok: true, name: name.trim() });
+});
+
 app.delete("/api/warehouses/:id", auth, (req, res) => {
   stmts.deleteWarehouse.run(req.params.id, req.userId);
   res.json({ ok: true });
 });
 
-// ═══════════════════════════════════════════
-// CELLS
-// ═══════════════════════════════════════════
+// ═══ CELLS ═══
 app.get("/api/warehouses/:whId/cells", auth, (req, res) => {
   const cells = stmts.getCells.all(req.params.whId, req.userId);
   const result = cells.map(c => {
@@ -233,7 +210,6 @@ app.get("/api/warehouses/:whId/cells", auth, (req, res) => {
     scans.forEach(s => {
       if (!items[s.barcode]) items[s.barcode] = { barcode: s.barcode, article: s.article, qty: 0 };
       items[s.barcode].qty++;
-      // Update article from articles table
       const art = stmts.getArticle.get(req.userId, s.barcode);
       if (art) items[s.barcode].article = art.article;
     });
@@ -250,14 +226,37 @@ app.post("/api/warehouses/:whId/cells", auth, (req, res) => {
   res.json({ id, name: name.trim() });
 });
 
+app.post("/api/warehouses/:whId/cells/import", auth, (req, res) => {
+  const { names } = req.body;
+  if (!Array.isArray(names) || !names.length) return res.status(400).json({ error: "Пустой список" });
+  const createMany = db.transaction((list) => {
+    let count = 0;
+    for (const nm of list) {
+      if (nm?.trim()) {
+        const id = uid();
+        stmts.createCell.run(id, req.params.whId, req.userId, nm.trim());
+        count++;
+      }
+    }
+    return count;
+  });
+  const count = createMany(names);
+  res.json({ ok: true, count });
+});
+
+app.put("/api/cells/:id", auth, (req, res) => {
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "Укажите название" });
+  stmts.renameCell.run(name.trim(), req.params.id, req.userId);
+  res.json({ ok: true, name: name.trim() });
+});
+
 app.delete("/api/cells/:id", auth, (req, res) => {
   stmts.deleteCell.run(req.params.id, req.userId);
   res.json({ ok: true });
 });
 
-// ═══════════════════════════════════════════
-// SCANS (items in a cell)
-// ═══════════════════════════════════════════
+// ═══ SCANS ═══
 app.get("/api/cells/:cellId/items", auth, (req, res) => {
   const scans = stmts.getScans.all(req.params.cellId, req.userId);
   const items = {};
@@ -273,15 +272,17 @@ app.get("/api/cells/:cellId/items", auth, (req, res) => {
 });
 
 app.post("/api/cells/:cellId/scan", auth, (req, res) => {
-  const { barcode } = req.body;
-  if (!barcode?.trim()) return res.status(400).json({ error: "Пустой баркод" });
+  const { barcode, article: manualArticle } = req.body;
+  if (!barcode?.trim() && !manualArticle?.trim()) return res.status(400).json({ error: "Пустой ввод" });
   const cell = stmts.getCell.get(req.params.cellId, req.userId);
   if (!cell) return res.status(404).json({ error: "Ячейка не найдена" });
 
-  const art = stmts.getArticle.get(req.userId, barcode.trim());
+  const bc = barcode?.trim() || "";
+  const art = bc ? stmts.getArticle.get(req.userId, bc) : null;
+  const articleVal = manualArticle?.trim() || art?.article || "";
   const now = new Date().toISOString();
-  stmts.addScan.run(req.params.cellId, req.userId, barcode.trim(), art?.article || "", now);
-  res.json({ ok: true, article: art?.article || "" });
+  stmts.addScan.run(req.params.cellId, req.userId, bc, articleVal, now);
+  res.json({ ok: true, article: articleVal });
 });
 
 app.delete("/api/cells/:cellId/items/:barcode", auth, (req, res) => {
@@ -301,15 +302,28 @@ app.post("/api/cells/:cellId/items/:barcode/adjust", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ═══════════════════════════════════════════
-// ARTICLES
-// ═══════════════════════════════════════════
+// ═══ ARTICLES ═══
 app.get("/api/articles", auth, (req, res) => {
   res.json(stmts.getArticles.all(req.userId));
 });
 
+app.get("/api/articles/search", auth, (req, res) => {
+  const q = req.query.q?.trim();
+  if (!q) return res.json([]);
+  const pattern = "%" + q + "%";
+  res.json(stmts.searchArticles.all(req.userId, pattern, pattern));
+});
+
+app.get("/api/articles/lookup", auth, (req, res) => {
+  const article = req.query.article?.trim();
+  if (!article) return res.json({ found: false });
+  const row = stmts.getArticleByName.get(req.userId, article);
+  if (row) return res.json({ found: true, barcode: row.barcode, article: row.article });
+  return res.json({ found: false });
+});
+
 app.post("/api/articles/upload", auth, (req, res) => {
-  const { items } = req.body; // [{ barcode, article }]
+  const { items } = req.body;
   if (!Array.isArray(items)) return res.status(400).json({ error: "Неверный формат" });
   const upsert = db.transaction((list) => {
     for (const { barcode, article } of list) {
@@ -327,9 +341,7 @@ app.delete("/api/articles", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ═══════════════════════════════════════════
-// SETTINGS
-// ═══════════════════════════════════════════
+// ═══ SETTINGS ═══
 app.get("/api/settings", auth, (req, res) => {
   const s = stmts.getSettings.get(req.userId);
   res.json(s || { barcode_format: "all" });
@@ -341,38 +353,30 @@ app.put("/api/settings", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ═══════════════════════════════════════════
-// EXPORT
-// ═══════════════════════════════════════════
+// ═══ EXPORT ═══
 app.get("/api/export", auth, (req, res) => {
   const rows = stmts.exportAll.all(req.userId);
   res.json(rows);
 });
 
-// ═══════════════════════════════════════════
-// RESET
-// ═══════════════════════════════════════════
+// ═══ RESET ═══
 app.delete("/api/data", auth, (req, res) => {
   stmts.deleteAllData.run(req.userId);
   stmts.deleteArticles.run(req.userId);
   res.json({ ok: true });
 });
 
-// SPA fallback
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ═══════════════════════════════════════════
-// Start HTTP + HTTPS
-// ═══════════════════════════════════════════
+// ═══ Start HTTP + HTTPS ═══
 const https = require("https");
 const { execSync } = require("child_process");
 
 const keyPath = path.join(__dirname, "key.pem");
 const certPath = path.join(__dirname, "cert.pem");
 
-// Auto-generate self-signed cert if missing
 if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
   try {
     console.log("  🔐 Генерация SSL-сертификата...");
@@ -381,28 +385,24 @@ if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
       { stdio: "ignore" }
     );
   } catch (e) {
-    console.log("  ⚠️  openssl не найден — HTTPS недоступен. Камера будет работать только на localhost.");
-    console.log("     Установите openssl или используйте: npx ngrok http " + PORT);
+    console.log("  ⚠️  openssl не найден — HTTPS недоступен.");
   }
 }
 
-// HTTP
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n  ✅ ScanStock запущен:`);
   console.log(`     http://localhost:${PORT}`);
 });
 
-// HTTPS (for mobile camera)
 if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
-  const HTTPS_PORT = Number(PORT) + 443; // 3443
+  const HTTPS_PORT = Number(PORT) + 443;
   try {
     https.createServer({
       key: fs.readFileSync(keyPath),
       cert: fs.readFileSync(certPath),
     }, app).listen(HTTPS_PORT, "0.0.0.0", () => {
       console.log(`     https://localhost:${HTTPS_PORT}`);
-      console.log(`\n  📱 С телефона: https://192.168.1.50:${HTTPS_PORT}`);
-      console.log(`     (примите предупреждение о сертификате)\n`);
+      console.log(`\n  📱 С телефона: https://192.168.1.50:${HTTPS_PORT}\n`);
     });
   } catch (e) {
     console.log("  ⚠️  Не удалось запустить HTTPS:", e.message);
