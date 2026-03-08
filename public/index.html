@@ -14,6 +14,8 @@ input:focus{border-color:#00c96a;box-shadow:0 0 0 3px rgba(0,201,106,.15)}
 select{font-family:inherit;-webkit-appearance:auto;appearance:auto}
 input::placeholder{color:#484860}
 button{font-family:inherit;transition:all .15s ease}
+input[type=range]{padding:0;height:6px;border:none;background:#252540;border-radius:3px;-webkit-appearance:none;appearance:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#00c96a;cursor:pointer;border:2px solid #0a0a16}
 
 .B{display:flex;align-items:center;justify-content:center;gap:7px;padding:13px 16px;border-radius:10px;border:none;font-size:15px;font-weight:600;cursor:pointer;transition:all .15s ease}
 .B:active{transform:scale(.97)}
@@ -41,7 +43,9 @@ button{font-family:inherit;transition:all .15s ease}
 .qty-btn{width:36px;height:36px;border-radius:9px;border:1.5px solid #252540;background:transparent;color:#999;cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;transition:all .15s ease}
 .qty-btn:hover{border-color:#00c96a;color:#00c96a;background:rgba(0,201,106,.06)}
 
-.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;font-size:14px;font-weight:600;z-index:9999;animation:toastIn .3s ease,toastOut .3s ease 2.2s forwards;pointer-events:none}
+.ki-badge{display:inline-flex;align-items:center;gap:3px;background:#ff8f0020;color:#ffb74d;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700}
+
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;font-size:14px;font-weight:600;z-index:9999;animation:toastIn .3s ease,toastOut .3s ease 2.2s forwards;pointer-events:none;max-width:90vw;text-align:center}
 .toast-ok{background:#00c96a;color:#fff}
 .toast-err{background:#c62828;color:#fff}
 .toast-warn{background:#ff8f00;color:#fff}
@@ -52,10 +56,7 @@ button{font-family:inherit;transition:all .15s ease}
 @keyframes scanmv{0%,100%{top:20%}50%{top:80%}}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes slideUp{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
-
 .fade-in{animation:fadeIn .25s ease both}
-
-/* Scrollbar */
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:#252540;border-radius:4px}
@@ -73,11 +74,10 @@ button{font-family:inherit;transition:all .15s ease}
 <div id="root"></div>
 <script type="module">
 import{h,render}from"preact";
-import{useState,useEffect,useRef,useCallback,useMemo}from"preact/hooks";
+import{useState,useEffect,useRef,useCallback}from"preact/hooks";
 import htm from"htm";
 const html=htm.bind(h);
 
-/* ═══ API ═══ */
 const API={
   _t:localStorage.getItem("ss_t")||"",
   setT(v){this._t=v;localStorage.setItem("ss_t",v)},
@@ -93,19 +93,14 @@ const API={
   put(p,b){return this.r("PUT",p,b)},del(p){return this.r("DELETE",p)}
 };
 
-/* ═══ TOAST ═══ */
 let _toastEl=null;
 function showToast(msg,type="ok"){
   if(_toastEl)_toastEl.remove();
-  const d=document.createElement("div");
-  d.className="toast toast-"+type;
-  d.textContent=msg;
-  document.body.appendChild(d);
-  _toastEl=d;
+  const d=document.createElement("div");d.className="toast toast-"+type;d.textContent=msg;
+  document.body.appendChild(d);_toastEl=d;
   setTimeout(()=>{if(d.parentNode)d.remove();if(_toastEl===d)_toastEl=null},2500);
 }
 
-/* ═══ SVG ICON ═══ */
 function I({d,s=20,c="currentColor"}){
   return html`<svg width=${s} height=${s} viewBox="0 0 24 24" fill="none" stroke=${c} stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d=${d}/></svg>`;
 }
@@ -121,11 +116,23 @@ const ic={
   user:"M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
   edit:"M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z",
   search:"M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16zM21 21l-4.35-4.35",
-  importIc:"M12 3v12M5 12h14M4 21h16",
   check:"M20 6L9 17l-5-5",
-  x:"M18 6L6 18M6 6l12 12",
   tag:"M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z M7 7h.01",
 };
+
+/* ═══ KI (Честный Знак) PARSER ═══
+   КИ = 01 + GTIN(14) + 21 + serial(13) = 31 chars
+   Pattern: starts with "01", 14 digits GTIN, "21", 13 chars serial
+*/
+function parseKI(raw){
+  if(!raw||raw.length<31)return null;
+  // Handle GS1 format: may have \x1d separators or FNC1
+  const clean=raw.replace(/[\x1d\x00]/g,"");
+  // Must start with 01 + 14digit GTIN + 21 + serial
+  const m=clean.match(/^01(\d{14})21(.{13})/);
+  if(!m)return null;
+  return{gtin:m[1],serial:m[2],ki:clean.substring(0,31)};
+}
 
 /* ═══ BARCODE ANALYZER ═══ */
 const FORMAT_MAP={all:null,ean_13:"ean_13",ean_8:"ean_8",upc_a:"upc_a",upc_e:"upc_e",data_matrix:"data_matrix",qr_code:"qr_code",code_128:"code_128",code_39:"code_39"};
@@ -156,9 +163,12 @@ class BarcodeAnalyzer{
       const cx=vw/2,cy=vh/2,sw=vw*this.scanAreaPercent,sh=vh*this.scanAreaPercent;
       if(box.x<cx-sw/2||box.x+box.width>cx+sw/2||box.y<cy-sh/2||box.y+box.height>cy+sh/2)return;
       if(best.format==="ean_13"){if(!/^\d{13}$/.test(value))return;const d=value.split("").map(Number);const c=d.pop();const s=d.reduce((a,n,i)=>a+n*(i%2===0?1:3),0);if((10-(s%10))%10!==c)return}
-      if(this.lastCandidate===value){this.confirmCount++}else{this.lastCandidate=value;this.confirmCount=1}
-      if(this.confirmCount<this.requiredConfirmations)return;
-      this.confirmCount=0;this.lastCandidate=null;
+      // Confirmation logic
+      if(this.requiredConfirmations>0){
+        if(this.lastCandidate===value){this.confirmCount++}else{this.lastCandidate=value;this.confirmCount=1}
+        if(this.confirmCount<this.requiredConfirmations)return;
+        this.confirmCount=0;this.lastCandidate=null;
+      }
       const last=this.recentScans.get(value);if(last&&now-last<this.duplicateCooldownMs)return;
       this.lastScanTime=now;this.recentScans.set(value,now);
       const expire=now-300000;for(const[k,v]of this.recentScans){if(v<expire)this.recentScans.delete(k)}
@@ -168,7 +178,6 @@ class BarcodeAnalyzer{
   destroy(){this.detector=null;this.recentScans.clear()}
 }
 
-/* ═══ SOUND MANAGER ═══ */
 const SoundMgr={
   _ctx:null,
   _getCtx(){if(!this._ctx)this._ctx=new(window.AudioContext||window.webkitAudioContext)();return this._ctx},
@@ -179,7 +188,7 @@ const SoundMgr={
 };
 
 /* ═══ SCANNER ═══ */
-function Scanner({onScan,onClose,format}){
+function Scanner({onScan,onClose,format,scanDelay,scanConfirmations}){
   const videoRef=useRef(null);const analyzerRef=useRef(null);
   const[last,setLast]=useState(null);const[count,setCount]=useState(0);
   const[err,setErr]=useState(null);const[loading,setLoading]=useState(true);
@@ -192,7 +201,9 @@ function Scanner({onScan,onClose,format}){
     (async()=>{
       try{
         const analyzer=new BarcodeAnalyzer();analyzerRef.current=analyzer;
-        analyzer.scanThrottleMs=200;analyzer.duplicateCooldownMs=2500;
+        analyzer.scanThrottleMs=scanDelay||300;
+        analyzer.duplicateCooldownMs=2500;
+        analyzer.requiredConfirmations=scanConfirmations!=null?scanConfirmations:3;
         const ok=await analyzer.init(format);
         if(deadRef.current)return;
         if(!ok){setErr("Не удалось инициализировать сканер");setLoading(false);return}
@@ -219,7 +230,7 @@ function Scanner({onScan,onClose,format}){
       }
     })();
     return()=>{deadRef.current=true;cancelAnimationFrame(rafId);if(streamRef.current)streamRef.current.getTracks().forEach(t=>t.stop());if(analyzerRef.current)analyzerRef.current.destroy()};
-  },[format,onScan]);
+  },[format,onScan,scanDelay,scanConfirmations]);
 
   return html`
     <div style=${{position:"fixed",inset:0,zIndex:2000,background:"#000",display:"flex",flexDirection:"column"}}>
@@ -243,7 +254,7 @@ function Scanner({onScan,onClose,format}){
       </div>
       ${last&&html`<div style=${{background:"linear-gradient(135deg,#0d7a42,#0a6838)",color:"#fff",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         <div style=${{width:28,height:28,borderRadius:"50%",background:"rgba(255,255,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0}}>${count}</div>
-        <div style=${{flex:1,fontFamily:"monospace",fontSize:14,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${last}</div>
+        <div style=${{flex:1,fontFamily:"monospace",fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>${last}</div>
       </div>`}
       ${err&&html`<div style=${{background:"#c62828",color:"#fff",padding:16,textAlign:"center",fontSize:14,flexShrink:0,lineHeight:1.4}}>${err}</div>`}
       <button onClick=${onClose} class="B" style=${{background:"#151530",color:"#eee",borderRadius:0,padding:18,fontSize:16,borderTop:"1px solid #222"}}>✕ Закрыть сканер</button>
@@ -252,7 +263,6 @@ function Scanner({onScan,onClose,format}){
 }
 
 /* ═══ UI COMPONENTS ═══ */
-
 function Sheet({children,onClose}){
   return html`<div onClick=${onClose} style=${{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
     <div onClick=${e=>e.stopPropagation()} style=${{background:"#161630",border:"1px solid #252545",borderRadius:16,padding:"24px 20px",width:"100%",maxWidth:420,maxHeight:"80vh",overflowY:"auto",animation:"slideUp .25s ease"}}>${children}</div>
@@ -260,8 +270,7 @@ function Sheet({children,onClose}){
 }
 
 function InputSheet({title,placeholder,onSubmit,onClose}){
-  const[v,setV]=useState("");
-  const ref=useRef(null);
+  const[v,setV]=useState("");const ref=useRef(null);
   useEffect(()=>{setTimeout(()=>ref.current?.focus(),150)},[]);
   const go=()=>{if(v.trim()){onSubmit(v.trim());setV("")}};
   return html`<${Sheet} onClose=${onClose}>
@@ -274,10 +283,8 @@ function InputSheet({title,placeholder,onSubmit,onClose}){
   <//>`;
 }
 
-/* ═══ RENAME SHEET ═══ */
 function RenameSheet({title,currentName,onSubmit,onClose}){
-  const[v,setV]=useState(currentName||"");
-  const ref=useRef(null);
+  const[v,setV]=useState(currentName||"");const ref=useRef(null);
   useEffect(()=>{setTimeout(()=>{ref.current?.focus();ref.current?.select()},150)},[]);
   const go=()=>{if(v.trim()&&v.trim()!==currentName){onSubmit(v.trim())}onClose()};
   return html`<${Sheet} onClose=${onClose}>
@@ -290,67 +297,41 @@ function RenameSheet({title,currentName,onSubmit,onClose}){
   <//>`;
 }
 
-/* ═══ MANUAL INPUT (universal: barcode or article) ═══ */
+/* ═══ MANUAL INPUT ═══ */
 function ManualInput({onScan,onClose}){
-  const[mode,setMode]=useState("barcode"); // barcode | article
-  const[v,setV]=useState("");
-  const[warn,setWarn]=useState("");
-  const ref=useRef(null);
+  const[mode,setMode]=useState("barcode");
+  const[v,setV]=useState("");const[warn,setWarn]=useState("");const ref=useRef(null);
   useEffect(()=>{setTimeout(()=>ref.current?.focus(),150)},[]);
   useEffect(()=>{setV("");setWarn("");setTimeout(()=>ref.current?.focus(),50)},[mode]);
 
   const go=async()=>{
-    if(!v.trim())return;
-    setWarn("");
+    if(!v.trim())return;setWarn("");
     if(mode==="barcode"){
-      onScan(v.trim(),"manual");
-      setV("");
-      ref.current?.focus();
+      onScan(v.trim(),"manual");setV("");ref.current?.focus();
     }else{
-      // Article mode: lookup article -> get barcode
       try{
         const r=await API.get("/articles/lookup?article="+encodeURIComponent(v.trim()));
-        if(r.found){
-          onScan(r.barcode,"manual",r.article);
-          showToast(r.article+" → "+r.barcode,"ok");
-          setV("");
-          ref.current?.focus();
-        }else{
-          // Article not found in table — add as article-only (no barcode)
-          setWarn("Артикул не найден в таблице. Добавить без баркода?");
-        }
-      }catch(e){setWarn("Ошибка поиска: "+e.message)}
+        if(r.found){onScan(r.barcode,"manual",r.article);showToast(r.article+" → "+r.barcode,"ok");setV("");ref.current?.focus()}
+        else{setWarn("Артикул не найден в таблице. Добавить без баркода?")}
+      }catch(e){setWarn("Ошибка: "+e.message)}
     }
   };
-
-  const addWithoutBarcode=()=>{
-    // Add article without barcode — pass empty barcode, article as manual
-    onScan("","manual",v.trim());
-    showToast("Добавлен артикул: "+v.trim(),"ok");
-    setV("");setWarn("");
-    ref.current?.focus();
-  };
+  const addWithout=()=>{onScan("","manual",v.trim());showToast("Добавлен: "+v.trim(),"ok");setV("");setWarn("");ref.current?.focus()};
 
   return html`
     <div style=${{position:"fixed",inset:0,zIndex:2000,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div style=${{background:"#161630",border:"1px solid #252545",borderRadius:16,padding:24,width:"100%",maxWidth:420,animation:"slideUp .25s ease"}}>
         <h3 style=${{color:"#e8e8f0",margin:"0 0 14px",fontSize:18}}>Ручной ввод</h3>
-        
         <div style=${{display:"flex",marginBottom:14,background:"#0d0d1a",borderRadius:10,padding:3}}>
           ${[["barcode","Баркод"],["article","Артикул"]].map(([m,l])=>html`
             <button key=${m} onClick=${()=>setMode(m)} style=${{flex:1,padding:"9px 0",borderRadius:8,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",transition:"all .15s",background:mode===m?"#252545":"transparent",color:mode===m?"#fff":"#666"}}>${l}</button>
           `)}
         </div>
-
         <input ref=${ref} value=${v} onInput=${e=>{setV(e.target.value);setWarn("")}} onKeyDown=${e=>e.key==="Enter"&&go()} placeholder=${mode==="barcode"?"Введите баркод...":"Введите артикул..."}/>
-        
-        ${warn&&html`
-          <div style=${{marginTop:10,padding:"10px 12px",borderRadius:10,background:"#ff8f0015",border:"1px solid #ff8f0033",fontSize:13,color:"#ffb74d"}}>
-            ${warn}
-            <button class="B" style=${{marginTop:8,padding:"8px 14px",background:"#ff8f00",color:"#fff",fontSize:13,width:"100%"}} onClick=${addWithoutBarcode}>Добавить без баркода</button>
-          </div>
-        `}
-
+        ${warn&&html`<div style=${{marginTop:10,padding:"10px 12px",borderRadius:10,background:"#ff8f0015",border:"1px solid #ff8f0033",fontSize:13,color:"#ffb74d"}}>
+          ${warn}
+          <button class="B" style=${{marginTop:8,padding:"8px 14px",background:"#ff8f00",color:"#fff",fontSize:13,width:"100%"}} onClick=${addWithout}>Добавить без баркода</button>
+        </div>`}
         <div style=${{display:"flex",gap:8,marginTop:14}}>
           <button class="B BG" style=${{flex:1}} onClick=${go}>Добавить</button>
           <button class="B BO" style=${{flex:1}} onClick=${onClose}>Закрыть</button>
@@ -360,36 +341,50 @@ function ManualInput({onScan,onClose}){
   `;
 }
 
-/* ═══ SEARCH SHEET ═══ */
-function SearchSheet({onClose}){
-  const[q,setQ]=useState("");
-  const[results,setResults]=useState([]);
-  const[loading,setLoading]=useState(false);
-  const ref=useRef(null);
-  const timer=useRef(null);
+/* ═══ SEARCH SHEET (by article, across cells, with wh filter) ═══ */
+function SearchSheet({onClose,warehouses}){
+  const[q,setQ]=useState("");const[results,setResults]=useState([]);const[loading,setLoading]=useState(false);
+  const[whFilter,setWhFilter]=useState("");
+  const ref=useRef(null);const timer=useRef(null);
   useEffect(()=>{setTimeout(()=>ref.current?.focus(),150)},[]);
 
-  const doSearch=useCallback((query)=>{
+  const doSearch=useCallback((query,wh)=>{
     if(!query.trim()){setResults([]);return}
-    setLoading(true);
-    clearTimeout(timer.current);
+    setLoading(true);clearTimeout(timer.current);
     timer.current=setTimeout(async()=>{
-      try{const r=await API.get("/articles/search?q="+encodeURIComponent(query.trim()));setResults(r)}catch{}
+      try{
+        let url="/search/locations?q="+encodeURIComponent(query.trim());
+        if(wh)url+="&wh="+encodeURIComponent(wh);
+        setResults(await API.get(url));
+      }catch{}
       setLoading(false);
     },300);
   },[]);
 
-  const onInput=e=>{const val=e.target.value;setQ(val);doSearch(val)};
+  const onQ=e=>{const val=e.target.value;setQ(val);doSearch(val,whFilter)};
+  const onWh=e=>{const val=e.target.value;setWhFilter(val);doSearch(q,val)};
 
   return html`<${Sheet} onClose=${onClose}>
     <h3 style=${{margin:"0 0 14px",color:"#fff",fontSize:18}}><${I} d=${ic.search} s=${18}/> Поиск по артикулу</h3>
-    <input ref=${ref} value=${q} onInput=${onInput} placeholder="Артикул или баркод..."/>
-    <div style=${{marginTop:14,maxHeight:300,overflowY:"auto"}}>
+    <input ref=${ref} value=${q} onInput=${onQ} placeholder="Артикул или баркод..." style=${{marginBottom:8}}/>
+    <select value=${whFilter} onChange=${onWh} style=${{marginBottom:10,fontSize:14,fontFamily:"inherit"}}>
+      <option value="">Все склады</option>
+      ${(warehouses||[]).map(w=>html`<option key=${w.id} value=${w.id}>${w.name}</option>`)}
+    </select>
+    <div style=${{maxHeight:300,overflowY:"auto"}}>
       ${loading&&html`<div style=${{textAlign:"center",padding:16,color:"#666"}}>Поиск...</div>`}
       ${!loading&&q&&results.length===0&&html`<div style=${{textAlign:"center",padding:16,color:"#555"}}>Ничего не найдено</div>`}
-      ${results.map(a=>html`
-        <div key=${a.id} class="card" style=${{padding:"11px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><div style=${{fontWeight:700,color:"#ddd",fontSize:14}}>${a.article}</div><div style=${{fontFamily:"monospace",fontSize:11,color:"#555",marginTop:2}}>${a.barcode}</div></div>
+      ${results.map((r,i)=>html`
+        <div key=${i} class="card" style=${{padding:"10px 14px",marginBottom:6}}>
+          <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style=${{fontWeight:700,color:"#ddd",fontSize:14}}>${r.article||"—"}</div>
+            <div style=${{display:"flex",gap:6,alignItems:"center"}}>
+              <span style=${{fontWeight:800,fontSize:16,color:"#fff",fontFamily:"monospace"}}>${r.qty}</span>
+              ${r.ki_count>0&&html`<span class="ki-badge">КИ ${r.ki_count}</span>`}
+            </div>
+          </div>
+          <div style=${{fontSize:11,color:"#555",fontFamily:"monospace",marginTop:2}}>${r.barcode}</div>
+          <div style=${{fontSize:12,color:"#00a5ff",marginTop:3}}>${r.wh_name} → ${r.cell_name}</div>
         </div>
       `)}
     </div>
@@ -399,34 +394,17 @@ function SearchSheet({onClose}){
 
 /* ═══ CELL IMPORT SHEET ═══ */
 function CellImportSheet({whId,onClose,onDone}){
-  const fRef=useRef(null);
-  const[preview,setPreview]=useState([]);
-  const[busy,setBusy]=useState(false);
-
+  const fRef=useRef(null);const[preview,setPreview]=useState([]);const[busy,setBusy]=useState(false);
   const onFile=async e=>{
-    const f=e.target.files?.[0];if(!f)return;
-    const t=await f.text();
+    const f=e.target.files?.[0];if(!f)return;const t=await f.text();
     const lines=t.split(/\r?\n/).map(l=>l.replace(/[;,\t]/g,"").trim()).filter(Boolean);
-    // Skip header if first line looks like header
     const start=(lines[0]&&/^(название|ячейка|name|cell)/i.test(lines[0]))?1:0;
-    setPreview(lines.slice(start));
-    e.target.value="";
+    setPreview(lines.slice(start));e.target.value="";
   };
-
-  const doImport=async()=>{
-    if(!preview.length)return;
-    setBusy(true);
-    try{
-      const r=await API.post("/warehouses/"+whId+"/cells/import",{names:preview});
-      showToast("Импортировано: "+r.count+" ячеек","ok");
-      onDone();onClose();
-    }catch(e){showToast(e.message,"err")}
-    setBusy(false);
-  };
-
+  const doImport=async()=>{if(!preview.length)return;setBusy(true);try{const r=await API.post("/warehouses/"+whId+"/cells/import",{names:preview});showToast("Импортировано: "+r.count+" ячеек","ok");onDone();onClose()}catch(e){showToast(e.message,"err")}setBusy(false)};
   return html`<${Sheet} onClose=${onClose}>
     <h3 style=${{margin:"0 0 14px",color:"#fff",fontSize:18}}><${I} d=${ic.ul} s=${18}/> Импорт ячеек</h3>
-    <p style=${{color:"#666",fontSize:13,margin:"0 0 12px"}}>CSV/TXT файл — по одной ячейке на строку</p>
+    <p style=${{color:"#666",fontSize:13,margin:"0 0 12px"}}>CSV/TXT — по одной ячейке на строку</p>
     <input ref=${fRef} type="file" accept=".csv,.txt,.tsv" style=${{display:"none"}} onChange=${onFile}/>
     <button class="B BD" style=${{width:"100%",marginBottom:12}} onClick=${()=>fRef.current?.click()}><${I} d=${ic.ul} s=${16}/> Выбрать файл</button>
     ${preview.length>0&&html`
@@ -434,23 +412,23 @@ function CellImportSheet({whId,onClose,onDone}){
         <div style=${{fontSize:12,color:"#666",marginBottom:6}}>Будет создано: ${preview.length} ячеек</div>
         ${preview.map((n,i)=>html`<div key=${i} style=${{padding:"4px 0",fontSize:13,color:"#bbb",borderBottom:"1px solid #1a1a30"}}>${n}</div>`)}
       </div>
-      <button class="B BG" style=${{width:"100%"}} onClick=${doImport} disabled=${busy}>${busy?"Импорт...":"Импортировать"}</button>
+      <button class="B BG" style=${{width:"100%"}} onClick=${doImport} disabled=${busy}>${busy?"...":"Импортировать"}</button>
     `}
   <//>`;
 }
 
-/* ═══ Export helpers ═══ */
+/* ═══ Export ═══ */
 async function doExpCSV(){
   const rows=await API.get("/export");
-  const b="\uFEFFАртикул;Баркод;Склад;Ячейка;Время\n"+rows.map(r=>[r.article,r.barcode,r.warehouse,r.cell,r.scanned_at].join(";")).join("\n");
+  const b="\uFEFFАртикул;Баркод;КИ;Склад;Ячейка;Время\n"+rows.map(r=>[r.article,r.barcode,r.ki||"",r.warehouse,r.cell,r.scanned_at].join(";")).join("\n");
   const u=URL.createObjectURL(new Blob([b],{type:"text/csv;charset=utf-8;"}));
   Object.assign(document.createElement("a"),{href:u,download:"scanstock.csv"}).click();URL.revokeObjectURL(u);
 }
 async function doExpXLSX(){
   const rows=await API.get("/export");
   const X=await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
-  const ws=X.utils.aoa_to_sheet([["Артикул","Баркод","Склад","Ячейка","Время"],...rows.map(r=>[r.article,r.barcode,r.warehouse,r.cell,r.scanned_at])]);
-  ws["!cols"]=[{wch:20},{wch:22},{wch:20},{wch:20},{wch:22}];
+  const ws=X.utils.aoa_to_sheet([["Артикул","Баркод","КИ","Склад","Ячейка","Время"],...rows.map(r=>[r.article,r.barcode,r.ki||"",r.warehouse,r.cell,r.scanned_at])]);
+  ws["!cols"]=[{wch:20},{wch:22},{wch:36},{wch:20},{wch:20},{wch:22}];
   const wb=X.utils.book_new();X.utils.book_append_sheet(wb,ws,"Сканирования");X.writeFile(wb,"scanstock.xlsx");
 }
 function dlTpl(){
@@ -460,16 +438,8 @@ function dlTpl(){
 
 /* ═══ AUTH ═══ */
 function Auth({onDone}){
-  const[mode,setMode]=useState("login");
-  const[user,setUser]=useState("");
-  const[pass,setPass]=useState("");
-  const[err,setErr]=useState("");
-  const[busy,setBusy]=useState(false);
-  const go=async()=>{
-    setErr("");setBusy(true);
-    try{const r=mode==="login"?await API.post("/login",{username:user,password:pass}):await API.post("/register",{username:user,password:pass});API.setT(r.token);onDone(r.username)}catch(e){setErr(e.message)}
-    setBusy(false);
-  };
+  const[mode,setMode]=useState("login");const[user,setUser]=useState("");const[pass,setPass]=useState("");const[err,setErr]=useState("");const[busy,setBusy]=useState(false);
+  const go=async()=>{setErr("");setBusy(true);try{const r=mode==="login"?await API.post("/login",{username:user,password:pass}):await API.post("/register",{username:user,password:pass});API.setT(r.token);onDone(r.username)}catch(e){setErr(e.message)}setBusy(false)};
   return html`
     <div style=${{position:"fixed",inset:0,background:"#0a0a16",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style=${{width:"100%",maxWidth:380}}>
@@ -495,28 +465,18 @@ function Auth({onDone}){
 /* ═══ MAIN ═══ */
 function Main({username,onLogout}){
   const[pg,setPg]=useState("home");
-  const[whs,setWhs]=useState([]);
-  const[cls,setCls]=useState([]);
-  const[its,setIts]=useState([]);
-  const[arts,setArts]=useState([]);
-  const[fmt,setFmt]=useState("all");
-  const[wid,setWid]=useState(null);
-  const[cid,setCid]=useState(null);
-  const[wnm,setWnm]=useState("");
-  const[cnm,setCnm]=useState("");
-  const[scn,setScn]=useState(false);
-  const[man,setMan]=useState(false);
-  const[sht,setSht]=useState(null); // "wh"|"cl"|null
-  const[renSht,setRenSht]=useState(null); // {type:"wh"|"cl",id,name}
-  const[showSearch,setShowSearch]=useState(false);
-  const[showCellImport,setShowCellImport]=useState(false);
+  const[whs,setWhs]=useState([]);const[cls,setCls]=useState([]);const[its,setIts]=useState([]);const[arts,setArts]=useState([]);
+  const[fmt,setFmt]=useState("all");const[scanDelay,setScanDelay]=useState(300);const[scanConf,setScanConf]=useState(3);
+  const[wid,setWid]=useState(null);const[cid,setCid]=useState(null);const[wnm,setWnm]=useState("");const[cnm,setCnm]=useState("");
+  const[scn,setScn]=useState(false);const[man,setMan]=useState(false);const[sht,setSht]=useState(null);
+  const[renSht,setRenSht]=useState(null);const[showSearch,setShowSearch]=useState(false);const[showCellImport,setShowCellImport]=useState(false);
   const fRef=useRef(null);
 
   const ldW=async()=>{try{setWhs(await API.get("/warehouses"))}catch{}};
   const ldC=async id=>{try{setCls(await API.get("/warehouses/"+id+"/cells"))}catch{}};
   const ldI=async id=>{try{setIts(await API.get("/cells/"+id+"/items"))}catch{}};
   const ldA=async()=>{try{setArts(await API.get("/articles"))}catch{}};
-  const ldF=async()=>{try{const s=await API.get("/settings");setFmt(s.barcode_format||"all")}catch{}};
+  const ldF=async()=>{try{const s=await API.get("/settings");setFmt(s.barcode_format||"all");setScanDelay(s.scan_delay||300);setScanConf(s.scan_confirmations!=null?s.scan_confirmations:3)}catch{}};
 
   useEffect(()=>{ldW();ldF()},[]);
 
@@ -527,19 +487,40 @@ function Main({username,onLogout}){
 
   const addW=async n=>{await API.post("/warehouses",{name:n});setSht(null);ldW()};
   const delW=async(id,nm)=>{if(!confirm("Удалить «"+nm+"» и все данные?"))return;await API.del("/warehouses/"+id);ldW()};
-  const renW=async(id,newName)=>{await API.put("/warehouses/"+id,{name:newName});setRenSht(null);if(wid===id)setWnm(newName);ldW()};
-
+  const renW=async(id,nn)=>{await API.put("/warehouses/"+id,{name:nn});setRenSht(null);if(wid===id)setWnm(nn);ldW()};
   const addC=async n=>{await API.post("/warehouses/"+wid+"/cells",{name:n});setSht(null);ldC(wid)};
   const delC=async(id,nm)=>{if(!confirm("Удалить «"+nm+"»?"))return;await API.del("/cells/"+id);ldC(wid)};
-  const renC=async(id,newName)=>{await API.put("/cells/"+id,{name:newName});setRenSht(null);if(cid===id)setCnm(newName);ldC(wid)};
+  const renC=async(id,nn)=>{await API.put("/cells/"+id,{name:nn});setRenSht(null);if(cid===id)setCnm(nn);ldC(wid)};
 
   const cidRef=useRef(cid);cidRef.current=cid;
-  const doScan=useCallback(async(bc,fmt,manualArticle)=>{
+
+  // Main scan handler — handles KI (Honest Mark DataMatrix)
+  const doScan=useCallback(async(rawCode,format,manualArticle)=>{
     const id=cidRef.current;if(!id)return;
+
+    // Check if it's a КИ (Честный Знак DataMatrix)
+    const ki=parseKI(rawCode);
+    if(ki){
+      // It's a КИ — use GTIN as barcode for article lookup
+      try{
+        const r=await API.post("/cells/"+id+"/scan",{barcode:ki.gtin,ki:ki.ki});
+        SoundMgr.success();
+        showToast("КИ: "+ki.gtin+" ("+ki.serial.substring(0,6)+"...)","ok");
+      }catch(e){
+        // Duplicate KI
+        SoundMgr.error();
+        showToast(e.message,"warn");
+        try{navigator.vibrate([100,50,100])}catch(e2){}
+      }
+      ldI(id);
+      return;
+    }
+
+    // Regular barcode
     SoundMgr.success();
-    const body={barcode:bc};
+    const body={barcode:rawCode};
     if(manualArticle)body.article=manualArticle;
-    await API.post("/cells/"+id+"/scan",body);
+    try{await API.post("/cells/"+id+"/scan",body)}catch(e){showToast(e.message,"err")}
     ldI(id);
   },[]);
 
@@ -547,15 +528,14 @@ function Main({username,onLogout}){
   const adjQ=async(bc,d)=>{await API.post("/cells/"+cid+"/items/"+encodeURIComponent(bc)+"/adjust",{delta:d});ldI(cid)};
 
   const upArt=async e=>{
-    const f=e.target.files?.[0];if(!f)return;
-    const t=await f.text();const ls=t.split(/\r?\n/).filter(l=>l.trim());
+    const f=e.target.files?.[0];if(!f)return;const t=await f.text();const ls=t.split(/\r?\n/).filter(l=>l.trim());
     const items=[];
     for(let i=1;i<ls.length;i++){const p=ls[i].split(/[;,\t]/);if(p.length>=2&&p[0].trim()&&p[1].trim())items.push({barcode:p[0].trim(),article:p[1].trim()})}
-    if(items.length){await API.post("/articles/upload",{items});showToast("Загружено: "+items.length+" артикулов","ok")}
+    if(items.length){await API.post("/articles/upload",{items});showToast("Загружено: "+items.length,"ok")}
     ldA();e.target.value="";
   };
-  const savF=async f=>{setFmt(f);await API.put("/settings",{barcode_format:f})};
-  const reset=async()=>{if(!confirm("Удалить ВСЕ данные? Это необратимо!"))return;await API.del("/data");goH()};
+  const savSettings=async(f,del,conf)=>{setFmt(f);setScanDelay(del);setScanConf(conf);await API.put("/settings",{barcode_format:f,scan_delay:del,scan_confirmations:conf})};
+  const reset=async()=>{if(!confirm("Удалить ВСЕ данные?"))return;await API.del("/data");goH()};
 
   const isH=pg==="home",isW=pg==="wh",isC=pg==="cell",isS=pg==="settings",isE=pg==="export",isA=pg==="articles";
   const ttl=isH?"ScanStock":isW?wnm:isC?cnm:isS?"Настройки":isE?"Экспорт":"Артикулы";
@@ -563,10 +543,10 @@ function Main({username,onLogout}){
   const tS=whs.reduce((a,w)=>a+(w.scanCount||0),0);
   const tC=whs.reduce((a,w)=>a+(w.cellCount||0),0);
   const cQ=its.reduce((a,i)=>a+i.qty,0);
+  const cKI=its.reduce((a,i)=>a+(i.kiCount||0),0);
 
   return html`
     <div style=${{position:"fixed",inset:0,display:"flex",flexDirection:"column",background:"#0a0a16",color:"#e0e0ee",overflow:"hidden"}}>
-      <!-- HEADER -->
       <div style=${{background:"#10102a",borderBottom:"1px solid #1e1e38",padding:"12px 16px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         ${!isH&&html`<button class="icon-btn" onClick=${goB}><${I} d=${ic.back} s=${22}/></button>`}
         ${isH&&html`<div style=${{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#00c96a,#00a5ff)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 2px 8px rgba(0,201,106,.2)"}}><${I} d=${ic.scan} s=${17} c="#fff"/></div>`}
@@ -574,7 +554,10 @@ function Main({username,onLogout}){
           <div style=${{fontSize:17,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${ttl}</div>
           ${sub&&html`<div style=${{fontSize:11,color:"#555"}}>${sub}</div>`}
         </div>
-        ${isC&&html`<span class="badge" style=${{background:"#00c96a18",color:"#00c96a"}}>${cQ} шт.</span>`}
+        ${isC&&html`
+          <span class="badge" style=${{background:"#00c96a18",color:"#00c96a"}}>${cQ} шт.</span>
+          ${cKI>0&&html`<span class="ki-badge">КИ ${cKI}</span>`}
+        `}
         ${isH&&html`
           <button class="icon-btn" onClick=${()=>setShowSearch(true)}><${I} d=${ic.search} s=${20}/></button>
           <button class="icon-btn" onClick=${()=>{setPg("settings");ldF()}}><${I} d=${ic.gear} s=${20}/></button>
@@ -582,7 +565,6 @@ function Main({username,onLogout}){
         ${(isW||isC)&&html`<button class="icon-btn" onClick=${()=>setRenSht(isW?{type:"wh",id:wid,name:wnm}:{type:"cl",id:cid,name:cnm})}><${I} d=${ic.edit} s=${18}/></button>`}
       </div>
 
-      <!-- CONTENT -->
       <div style=${{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:16}}>
 
         ${isH&&html`
@@ -607,7 +589,7 @@ function Main({username,onLogout}){
             <div key=${w.id} class="card card-click fade-in" style=${{padding:"14px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12,animationDelay:i*40+"ms"}} onClick=${()=>goW(w.id,w.name)}>
               <div style=${{width:44,height:44,borderRadius:11,background:"linear-gradient(135deg,#00c96a15,#00c96a08)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><${I} d=${ic.wh} s=${20} c="#00c96a"/></div>
               <div style=${{flex:1,minWidth:0}}><div style=${{fontWeight:700,fontSize:16,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${w.name}</div><div style=${{fontSize:12,color:"#555"}}>${w.cellCount||0} яч. · ${w.scanCount||0} сканов</div></div>
-              <button class="icon-btn" onClick=${e=>{e.stopPropagation();setRenSht({type:"wh",id:w.id,name:w.name})}} title="Переименовать"><${I} d=${ic.edit} s=${14}/></button>
+              <button class="icon-btn" onClick=${e=>{e.stopPropagation();setRenSht({type:"wh",id:w.id,name:w.name})}}><${I} d=${ic.edit} s=${14}/></button>
               <button class="icon-btn icon-btn-danger" onClick=${e=>{e.stopPropagation();delW(w.id,w.name)}}><${I} d=${ic.del} s=${16}/></button>
             </div>
           `)}
@@ -625,8 +607,11 @@ function Main({username,onLogout}){
           :cls.map((c,i)=>html`
             <div key=${c.id} class="card card-click fade-in" style=${{padding:"14px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12,animationDelay:i*40+"ms"}} onClick=${()=>goC(c.id,c.name)}>
               <div style=${{width:44,height:44,borderRadius:11,background:"linear-gradient(135deg,#00a5ff15,#00a5ff08)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><${I} d=${ic.cell} s=${20} c="#00a5ff"/></div>
-              <div style=${{flex:1,minWidth:0}}><div style=${{fontWeight:700,fontSize:16,color:"#fff"}}>${c.name}</div><div style=${{fontSize:12,color:"#555"}}>${c.itemCount||0} поз. · ${c.scanCount||0} шт.</div></div>
-              <button class="icon-btn" onClick=${e=>{e.stopPropagation();setRenSht({type:"cl",id:c.id,name:c.name})}} title="Переименовать"><${I} d=${ic.edit} s=${14}/></button>
+              <div style=${{flex:1,minWidth:0}}><div style=${{fontWeight:700,fontSize:16,color:"#fff"}}>${c.name}</div>
+                <div style=${{fontSize:12,color:"#555"}}>${c.itemCount||0} поз. · ${c.scanCount||0} шт.${c.kiCount>0?" · ":""}</div>
+                ${c.kiCount>0&&html`<span class="ki-badge" style=${{marginTop:3}}>КИ ${c.kiCount}</span>`}
+              </div>
+              <button class="icon-btn" onClick=${e=>{e.stopPropagation();setRenSht({type:"cl",id:c.id,name:c.name})}}><${I} d=${ic.edit} s=${14}/></button>
               <button class="icon-btn icon-btn-danger" onClick=${e=>{e.stopPropagation();delC(c.id,c.name)}}><${I} d=${ic.del} s=${16}/></button>
             </div>
           `)}
@@ -635,17 +620,25 @@ function Main({username,onLogout}){
         ${isC&&html`
           ${its.length===0?html`<div class="card" style=${{padding:"48px 24px",textAlign:"center"}}><div style=${{fontSize:42,marginBottom:10}}>📷</div><div style=${{color:"#444",fontSize:15}}>Нажмите «Сканировать»</div></div>`
           :its.map((it,i)=>html`
-            <div key=${it.barcode||it.article} class="card fade-in" style=${{padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10,animationDelay:i*30+"ms"}}>
-              <div style=${{flex:1,minWidth:0}}>
-                <div style=${{fontWeight:700,fontSize:15,color:"#e8e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${it.article||"—"}</div>
-                <div style=${{fontFamily:"monospace",fontSize:11,color:"#484860",letterSpacing:".04em",marginTop:1}}>${it.barcode||"(без баркода)"}</div>
+            <div key=${it.barcode||it.article} class="card fade-in" style=${{padding:"12px 14px",marginBottom:8,animationDelay:i*30+"ms"}}>
+              <div style=${{display:"flex",alignItems:"center",gap:10}}>
+                <div style=${{flex:1,minWidth:0}}>
+                  <div style=${{fontWeight:700,fontSize:15,color:"#e8e8f0",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>${it.article||"—"}</div>
+                  <div style=${{fontFamily:"monospace",fontSize:11,color:"#484860",letterSpacing:".04em",marginTop:1}}>${it.barcode||"(без баркода)"}</div>
+                </div>
+                <div style=${{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                  <button class="qty-btn" onClick=${()=>adjQ(it.barcode,-1)}>−</button>
+                  <span style=${{minWidth:36,textAlign:"center",fontWeight:800,fontSize:18,fontFamily:"monospace",color:"#fff"}}>${it.qty}</span>
+                  <button class="qty-btn" onClick=${()=>adjQ(it.barcode,1)}>+</button>
+                </div>
+                <button class="icon-btn icon-btn-danger" onClick=${()=>delIt(it.barcode)}><${I} d=${ic.del} s=${16}/></button>
               </div>
-              <div style=${{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-                <button class="qty-btn" onClick=${()=>adjQ(it.barcode,-1)}>−</button>
-                <span style=${{minWidth:36,textAlign:"center",fontWeight:800,fontSize:18,fontFamily:"monospace",color:"#fff"}}>${it.qty}</span>
-                <button class="qty-btn" onClick=${()=>adjQ(it.barcode,1)}>+</button>
-              </div>
-              <button class="icon-btn icon-btn-danger" onClick=${()=>delIt(it.barcode)}><${I} d=${ic.del} s=${16}/></button>
+              ${it.kiCount>0&&html`
+                <div style=${{marginTop:6,display:"flex",alignItems:"center",gap:6}}>
+                  <span class="ki-badge">КИ ${it.kiCount}</span>
+                  <span style=${{fontSize:11,color:"#666"}}>из ${it.qty} шт.</span>
+                </div>
+              `}
             </div>
           `)}
         `}
@@ -655,10 +648,33 @@ function Main({username,onLogout}){
             <div style=${{width:44,height:44,borderRadius:"50%",background:"linear-gradient(135deg,#00c96a15,#00a5ff15)",display:"flex",alignItems:"center",justifyContent:"center"}}><${I} d=${ic.user} s=${20} c="#00c96a"/></div>
             <div><div style=${{fontWeight:700,color:"#fff",fontSize:16}}>${username}</div><div style=${{fontSize:12,color:"#555"}}>Серверная авторизация</div></div>
           </div>
+
           <label style=${{fontSize:13,color:"#777",display:"block",marginBottom:6}}>Формат баркода</label>
-          <select value=${fmt} onChange=${e=>savF(e.target.value)} style=${{marginBottom:18}}>
+          <select value=${fmt} onChange=${e=>savSettings(e.target.value,scanDelay,scanConf)} style=${{marginBottom:16}}>
             ${[["all","Все форматы"],["ean_13","EAN-13"],["ean_8","EAN-8"],["upc_a","UPC-A"],["upc_e","UPC-E"],["data_matrix","DataMatrix"],["qr_code","QR Code"],["code_128","Code 128"],["code_39","Code 39"]].map(([v,l])=>html`<option key=${v} value=${v}>${l}</option>`)}
           </select>
+
+          <label style=${{fontSize:13,color:"#777",display:"block",marginBottom:6}}>Задержка сканирования: <b style=${{color:"#fff"}}>${scanDelay} мс</b></label>
+          <input type="range" min="100" max="800" step="50" value=${scanDelay}
+            onInput=${e=>{const v=Number(e.target.value);setScanDelay(v)}}
+            onChange=${e=>savSettings(fmt,Number(e.target.value),scanConf)}
+            style=${{marginBottom:16}}/>
+          <div style=${{display:"flex",justifyContent:"space-between",fontSize:11,color:"#555",marginTop:-12,marginBottom:16,padding:"0 2px"}}>
+            <span>100мс</span><span>800мс</span>
+          </div>
+
+          <label style=${{fontSize:13,color:"#777",display:"block",marginBottom:8}}>Подтверждения сканирования</label>
+          <div style=${{display:"flex",gap:6,marginBottom:20}}>
+            ${[{v:0,l:"Без проверки"},{v:2,l:"2 проверки"},{v:3,l:"3 проверки"}].map(o=>html`
+              <button key=${o.v} onClick=${()=>{setScanConf(o.v);savSettings(fmt,scanDelay,o.v)}}
+                class="B" style=${{flex:1,padding:"10px 6px",fontSize:13,
+                  background:scanConf===o.v?"#00c96a22":"#1a1a30",
+                  color:scanConf===o.v?"#00c96a":"#888",
+                  border:scanConf===o.v?"1.5px solid #00c96a44":"1.5px solid #252540"
+                }}>${o.l}</button>
+            `)}
+          </div>
+
           <div style=${{display:"flex",flexDirection:"column",gap:8}}>
             <button class="B BD" onClick=${()=>{setPg("articles");ldA()}}><${I} d=${ic.tag} s=${16}/> Таблица артикулов</button>
             <button class="B BD" onClick=${()=>setShowSearch(true)}><${I} d=${ic.search} s=${16}/> Поиск по артикулу</button>
@@ -668,7 +684,7 @@ function Main({username,onLogout}){
         `}
 
         ${isE&&html`
-          <p style=${{color:"#666",fontSize:14,margin:"0 0 20px"}}>Артикул · Баркод · Склад · Ячейка · Время</p>
+          <p style=${{color:"#666",fontSize:14,margin:"0 0 20px"}}>Артикул · Баркод · КИ · Склад · Ячейка · Время</p>
           <div style=${{display:"flex",flexDirection:"column",gap:10}}>
             <button class="B BG" style=${{padding:16,fontSize:16}} onClick=${doExpXLSX}><${I} d=${ic.dl} s=${18}/> Скачать XLSX</button>
             <button class="B BD" style=${{padding:16,fontSize:16}} onClick=${doExpCSV}><${I} d=${ic.dl} s=${18}/> Скачать CSV</button>
@@ -693,32 +709,25 @@ function Main({username,onLogout}){
         `}
       </div>
 
-      <!-- BOTTOM BAR -->
       ${isC&&html`<div style=${{padding:"12px 16px",borderTop:"1px solid #1e1e38",background:"#10102a",display:"flex",gap:8,flexShrink:0}}>
         <button class="B BG" style=${{flex:1,padding:"15px 16px",fontSize:16}} onClick=${()=>setScn(true)}><${I} d=${ic.scan} s=${18}/> Сканировать</button>
         <button class="B BD" style=${{padding:"15px 18px"}} onClick=${()=>setMan(true)}><${I} d=${ic.kb} s=${18}/></button>
       </div>`}
 
-      <!-- OVERLAYS -->
-      ${scn&&html`<${Scanner} format=${fmt} onScan=${doScan} onClose=${()=>setScn(false)}/>`}
+      ${scn&&html`<${Scanner} format=${fmt} scanDelay=${scanDelay} scanConfirmations=${scanConf} onScan=${doScan} onClose=${()=>setScn(false)}/>`}
       ${man&&html`<${ManualInput} onScan=${doScan} onClose=${()=>setMan(false)}/>`}
       ${sht==="wh"&&html`<${InputSheet} title="Новый склад" placeholder="Название склада..." onSubmit=${addW} onClose=${()=>setSht(null)}/>`}
       ${sht==="cl"&&html`<${InputSheet} title="Новая ячейка" placeholder="Название ячейки..." onSubmit=${addC} onClose=${()=>setSht(null)}/>`}
       ${renSht&&html`<${RenameSheet} title=${renSht.type==="wh"?"Переименовать склад":"Переименовать ячейку"} currentName=${renSht.name} onSubmit=${n=>renSht.type==="wh"?renW(renSht.id,n):renC(renSht.id,n)} onClose=${()=>setRenSht(null)}/>`}
-      ${showSearch&&html`<${SearchSheet} onClose=${()=>setShowSearch(false)}/>`}
+      ${showSearch&&html`<${SearchSheet} onClose=${()=>setShowSearch(false)} warehouses=${whs}/>`}
       ${showCellImport&&html`<${CellImportSheet} whId=${wid} onClose=${()=>setShowCellImport(false)} onDone=${()=>ldC(wid)}/>`}
     </div>
   `;
 }
 
-/* ═══ ROOT ═══ */
 function App(){
-  const[user,setUser]=useState(null);
-  const[loading,setLoading]=useState(true);
-  useEffect(()=>{
-    if(API._t){API.get("/me").then(r=>setUser(r.username)).catch(()=>API.clr()).finally(()=>setLoading(false))}
-    else setLoading(false);
-  },[]);
+  const[user,setUser]=useState(null);const[loading,setLoading]=useState(true);
+  useEffect(()=>{if(API._t){API.get("/me").then(r=>setUser(r.username)).catch(()=>API.clr()).finally(()=>setLoading(false))}else setLoading(false)},[]);
   const logout=()=>{API.clr();setUser(null)};
   if(loading)return html`<div style=${{position:"fixed",inset:0,background:"#0a0a16",display:"flex",alignItems:"center",justifyContent:"center"}}><div style=${{width:44,height:44,border:"3px solid #1e1e38",borderTopColor:"#00c96a",borderRadius:"50%",animation:"spin .7s linear infinite"}}/></div>`;
   if(!user)return html`<${Auth} onDone=${setUser}/>`;

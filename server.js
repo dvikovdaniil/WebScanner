@@ -52,6 +52,7 @@ db.exec(`
     user_id INTEGER NOT NULL,
     barcode TEXT NOT NULL,
     article TEXT DEFAULT '',
+    ki TEXT DEFAULT '',
     scanned_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (cell_id) REFERENCES cells(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -67,9 +68,17 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
     user_id INTEGER PRIMARY KEY,
     barcode_format TEXT DEFAULT 'all',
+    scan_delay INTEGER DEFAULT 300,
+    scan_confirmations INTEGER DEFAULT 3,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
+
+// Migration: add ki column if missing
+try { db.exec("ALTER TABLE scans ADD COLUMN ki TEXT DEFAULT ''"); } catch(e) {}
+// Migration: add scan_delay, scan_confirmations to settings
+try { db.exec("ALTER TABLE settings ADD COLUMN scan_delay INTEGER DEFAULT 300"); } catch(e) {}
+try { db.exec("ALTER TABLE settings ADD COLUMN scan_confirmations INTEGER DEFAULT 3"); } catch(e) {}
 
 const stmts = {
   createUser: db.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)"),
@@ -87,7 +96,7 @@ const stmts = {
   renameCell: db.prepare("UPDATE cells SET name = ? WHERE id = ? AND user_id = ?"),
 
   getScans: db.prepare("SELECT * FROM scans WHERE cell_id = ? AND user_id = ? ORDER BY scanned_at DESC"),
-  addScan: db.prepare("INSERT INTO scans (cell_id, user_id, barcode, article, scanned_at) VALUES (?, ?, ?, ?, ?)"),
+  addScan: db.prepare("INSERT INTO scans (cell_id, user_id, barcode, article, ki, scanned_at) VALUES (?, ?, ?, ?, ?, ?)"),
   deleteScansByBarcode: db.prepare("DELETE FROM scans WHERE cell_id = ? AND user_id = ? AND barcode = ?"),
   deleteLastScan: db.prepare(`
     DELETE FROM scans WHERE id = (
@@ -95,20 +104,25 @@ const stmts = {
     )
   `),
 
+  // Check KI duplicate globally for user
+  findKI: db.prepare("SELECT s.id, c.name as cell_name, w.name as wh_name FROM scans s JOIN cells c ON s.cell_id = c.id JOIN warehouses w ON c.warehouse_id = w.id WHERE s.user_id = ? AND s.ki = ? AND s.ki != '' LIMIT 1"),
+
   getArticles: db.prepare("SELECT * FROM articles WHERE user_id = ?"),
   upsertArticle: db.prepare("INSERT INTO articles (user_id, barcode, article) VALUES (?, ?, ?) ON CONFLICT(user_id, barcode) DO UPDATE SET article = excluded.article"),
   getArticle: db.prepare("SELECT article FROM articles WHERE user_id = ? AND barcode = ?"),
   getArticleByName: db.prepare("SELECT barcode, article FROM articles WHERE user_id = ? AND article = ?"),
-  searchArticles: db.prepare("SELECT * FROM articles WHERE user_id = ? AND (article LIKE ? OR barcode LIKE ?) LIMIT 50"),
+  searchArticles: db.prepare("SELECT * FROM articles WHERE user_id = ? AND (article LIKE ? OR barcode LIKE ?) COLLATE NOCASE LIMIT 50"),
   deleteArticles: db.prepare("DELETE FROM articles WHERE user_id = ?"),
 
   getSettings: db.prepare("SELECT * FROM settings WHERE user_id = ?"),
-  upsertSettings: db.prepare("INSERT INTO settings (user_id, barcode_format) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET barcode_format = excluded.barcode_format"),
+  upsertSettings: db.prepare(`INSERT INTO settings (user_id, barcode_format, scan_delay, scan_confirmations) VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET barcode_format=excluded.barcode_format, scan_delay=excluded.scan_delay, scan_confirmations=excluded.scan_confirmations`),
 
   exportAll: db.prepare(`
     SELECT
       COALESCE(a.article, s.article, '') as article,
       s.barcode,
+      s.ki,
       w.name as warehouse,
       c.name as cell,
       s.scanned_at
@@ -118,6 +132,47 @@ const stmts = {
     LEFT JOIN articles a ON a.user_id = s.user_id AND a.barcode = s.barcode
     WHERE s.user_id = ?
     ORDER BY s.scanned_at DESC
+  `),
+
+  // Search: find article locations across all warehouses/cells
+  searchLocations: db.prepare(`
+    SELECT
+      a.article,
+      s.barcode,
+      w.id as wh_id, w.name as wh_name,
+      c.id as cell_id, c.name as cell_name,
+      COUNT(*) as qty,
+      SUM(CASE WHEN s.ki != '' THEN 1 ELSE 0 END) as ki_count
+    FROM scans s
+    JOIN cells c ON s.cell_id = c.id
+    JOIN warehouses w ON c.warehouse_id = w.id
+    LEFT JOIN articles a ON a.user_id = s.user_id AND a.barcode = s.barcode
+    WHERE s.user_id = ?
+      AND (a.article LIKE ? COLLATE NOCASE OR s.barcode LIKE ? COLLATE NOCASE OR s.article LIKE ? COLLATE NOCASE)
+    GROUP BY s.barcode, c.id
+    ORDER BY a.article, w.name, c.name
+    LIMIT 100
+  `),
+
+  // Same but with warehouse filter
+  searchLocationsWh: db.prepare(`
+    SELECT
+      a.article,
+      s.barcode,
+      w.id as wh_id, w.name as wh_name,
+      c.id as cell_id, c.name as cell_name,
+      COUNT(*) as qty,
+      SUM(CASE WHEN s.ki != '' THEN 1 ELSE 0 END) as ki_count
+    FROM scans s
+    JOIN cells c ON s.cell_id = c.id
+    JOIN warehouses w ON c.warehouse_id = w.id
+    LEFT JOIN articles a ON a.user_id = s.user_id AND a.barcode = s.barcode
+    WHERE s.user_id = ?
+      AND w.id = ?
+      AND (a.article LIKE ? COLLATE NOCASE OR s.barcode LIKE ? COLLATE NOCASE OR s.article LIKE ? COLLATE NOCASE)
+    GROUP BY s.barcode, c.id
+    ORDER BY a.article, w.name, c.name
+    LIMIT 100
   `),
 
   deleteAllData: db.prepare("DELETE FROM warehouses WHERE user_id = ?"),
@@ -207,13 +262,15 @@ app.get("/api/warehouses/:whId/cells", auth, (req, res) => {
   const result = cells.map(c => {
     const scans = stmts.getScans.all(c.id, req.userId);
     const items = {};
+    let kiTotal = 0;
     scans.forEach(s => {
       if (!items[s.barcode]) items[s.barcode] = { barcode: s.barcode, article: s.article, qty: 0 };
       items[s.barcode].qty++;
+      if (s.ki) kiTotal++;
       const art = stmts.getArticle.get(req.userId, s.barcode);
       if (art) items[s.barcode].article = art.article;
     });
-    return { ...c, itemCount: Object.keys(items).length, scanCount: scans.length };
+    return { ...c, itemCount: Object.keys(items).length, scanCount: scans.length, kiCount: kiTotal };
   });
   res.json(result);
 });
@@ -263,25 +320,38 @@ app.get("/api/cells/:cellId/items", auth, (req, res) => {
   scans.forEach(s => {
     if (!items[s.barcode]) {
       const art = stmts.getArticle.get(req.userId, s.barcode);
-      items[s.barcode] = { barcode: s.barcode, article: art?.article || s.article || "", qty: 0, scans: [] };
+      items[s.barcode] = { barcode: s.barcode, article: art?.article || s.article || "", qty: 0, kiCount: 0, kis: [], scans: [] };
     }
     items[s.barcode].qty++;
+    if (s.ki) { items[s.barcode].kiCount++; items[s.barcode].kis.push(s.ki); }
     items[s.barcode].scans.push(s.scanned_at);
   });
   res.json(Object.values(items));
 });
 
 app.post("/api/cells/:cellId/scan", auth, (req, res) => {
-  const { barcode, article: manualArticle } = req.body;
+  const { barcode, article: manualArticle, ki } = req.body;
   if (!barcode?.trim() && !manualArticle?.trim()) return res.status(400).json({ error: "Пустой ввод" });
   const cell = stmts.getCell.get(req.params.cellId, req.userId);
   if (!cell) return res.status(404).json({ error: "Ячейка не найдена" });
+
+  // Check KI duplicate
+  const kiVal = ki?.trim() || "";
+  if (kiVal) {
+    const existing = stmts.findKI.get(req.userId, kiVal);
+    if (existing) {
+      return res.status(409).json({
+        error: "Дубликат КИ",
+        detail: `КИ уже отсканирован: ${existing.wh_name} / ${existing.cell_name}`
+      });
+    }
+  }
 
   const bc = barcode?.trim() || "";
   const art = bc ? stmts.getArticle.get(req.userId, bc) : null;
   const articleVal = manualArticle?.trim() || art?.article || "";
   const now = new Date().toISOString();
-  stmts.addScan.run(req.params.cellId, req.userId, bc, articleVal, now);
+  stmts.addScan.run(req.params.cellId, req.userId, bc, articleVal, kiVal, now);
   res.json({ ok: true, article: articleVal });
 });
 
@@ -295,7 +365,7 @@ app.post("/api/cells/:cellId/items/:barcode/adjust", auth, (req, res) => {
   const barcode = decodeURIComponent(req.params.barcode);
   if (delta > 0) {
     const art = stmts.getArticle.get(req.userId, barcode);
-    stmts.addScan.run(req.params.cellId, req.userId, barcode, art?.article || "", new Date().toISOString());
+    stmts.addScan.run(req.params.cellId, req.userId, barcode, art?.article || "", "", new Date().toISOString());
   } else if (delta < 0) {
     stmts.deleteLastScan.run(req.params.cellId, req.userId, barcode);
   }
@@ -341,15 +411,33 @@ app.delete("/api/articles", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ═══ SEARCH LOCATIONS ═══
+app.get("/api/search/locations", auth, (req, res) => {
+  const q = req.query.q?.trim();
+  const whId = req.query.wh?.trim();
+  if (!q) return res.json([]);
+  const pattern = q + "%"; // prefix match
+  if (whId) {
+    res.json(stmts.searchLocationsWh.all(req.userId, whId, pattern, pattern, pattern));
+  } else {
+    res.json(stmts.searchLocations.all(req.userId, pattern, pattern, pattern));
+  }
+});
+
 // ═══ SETTINGS ═══
 app.get("/api/settings", auth, (req, res) => {
   const s = stmts.getSettings.get(req.userId);
-  res.json(s || { barcode_format: "all" });
+  res.json(s || { barcode_format: "all", scan_delay: 300, scan_confirmations: 3 });
 });
 
 app.put("/api/settings", auth, (req, res) => {
-  const { barcode_format } = req.body;
-  stmts.upsertSettings.run(req.userId, barcode_format || "all");
+  const { barcode_format, scan_delay, scan_confirmations } = req.body;
+  stmts.upsertSettings.run(
+    req.userId,
+    barcode_format || "all",
+    scan_delay != null ? Number(scan_delay) : 300,
+    scan_confirmations != null ? Number(scan_confirmations) : 3
+  );
   res.json({ ok: true });
 });
 
