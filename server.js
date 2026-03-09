@@ -402,7 +402,7 @@ app.post("/api/pickup", auth, (req, res) => {
   // If KI provided — find and remove exact KI scan
   if (ki) {
     const clean = raw.trim();
-    const parsed = clean.replace(/[\x1d\x00\x1e\x04]/g, "");
+    const parsed = clean.trim();
     const scan = stmts.findScanByKIExact.get(req.userId, parsed);
     if (!scan) {
       // Try with raw value too
