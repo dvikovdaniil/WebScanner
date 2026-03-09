@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "scanstock-k8x2m9pLwQz7vR4nJ6bY3cT0";
 
-const DB_DIR = path.join(__dirname, "data");
+const DB_DIR = "/data";
 const DB_PATH = path.join(DB_DIR, "scanstock.db");
 const BACKUP_DIR = path.join(DB_DIR, "backups");
 

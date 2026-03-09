@@ -73,13 +73,26 @@ const ic={wh:"M3 21V8l9-5 9 5v13M9 21v-6h6v6",cell:"M3 3h7v7H3zM14 3h7v7h-7zM3 1
    Храним ПОЛНЫЙ КИ. GTIN14→EAN-13 для сопоставления с артикулами.
 */
 function parseKI(raw){
-  if(!raw||raw.length<31)return null;
-  const clean=raw.replace(/[\x1d\x00\x1e\x04]/g,"");
-  const m=clean.match(/^01(\d{14})21(.{13})/);
-  if(!m)return null;
-  const gtin14=m[1];
-  const barcode=gtin14.startsWith("0")?gtin14.substring(1):gtin14;
-  return{gtin:barcode,gtin14,serial:m[2],ki:clean};
+  if(!raw) return null;
+
+  const clean = raw.replace(/[\x00\x1e\x04]/g,"").trim();
+
+  const m = clean.match(/^01(\d{14})21(.+?)(?:\x1d|91)/);
+  if(!m) return null;
+
+  const gtin14 = m[1];
+  const serial = m[2];
+
+  const barcode = gtin14.startsWith("0")
+    ? gtin14.substring(1)
+    : gtin14;
+
+  return {
+    gtin: barcode,
+    gtin14,
+    serial,
+    ki: clean
+  };
 }
 
 /* ═══ BARCODE ANALYZER ═══ */
