@@ -72,12 +72,25 @@ const ic={wh:"M3 21V8l9-5 9 5v13M9 21v-6h6v6",cell:"M3 3h7v7H3zM14 3h7v7h-7zM3 1
    Первые 31 символ = идентификатор, далее крипто-подпись.
    Храним ПОЛНЫЙ КИ. GTIN14→EAN-13 для сопоставления с артикулами.
 */
+
+
 function parseKI(raw){
   if(!raw) return null;
 
-  const clean = raw.replace(/[\x00\x1e\x04]/g,"").trim();
+  const GS = "\x1D";
 
-  const m = clean.match(/^01(\d{14})21(.+?)(?:\x1d|91)/);
+  let clean = raw
+    .replace(/[\x00\x1e\x04]/g,"")
+    .trim();
+
+  // если GS нет — вставляем перед 91 и 92
+  if(!clean.includes(GS)){
+    clean = clean
+      .replace(/21(.+?)91/, `21$1${GS}91`)
+      .replace(/91(.+?)92/, `91$1${GS}92`);
+  }
+
+  const m = clean.match(/^01(\d{14})21(.+?)(?:\x1D|91)/);
   if(!m) return null;
 
   const gtin14 = m[1];
