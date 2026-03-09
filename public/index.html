@@ -363,9 +363,14 @@ async function doExpLinenMark(){
       const gtinCell=ws[X.utils.encode_cell({r,c:1})];
       if(!gtinCell)continue;
       const gtin=String(gtinCell.v).trim();
-      const qty=qtyMap[gtin]||0;
-      const qtyAddr=X.utils.encode_cell({r,c:0});
-      ws[qtyAddr]={t:"n",v:qty};
+      const qty = qtyMap[gtin];
+      const qtyAddr = X.utils.encode_cell({r,c:0});
+
+      if (qty === undefined) {
+        delete ws[qtyAddr]; // ячейка будет пустая
+      } else {
+        ws[qtyAddr] = { t: "n", v: qty };
+      }
     }
     X.writeFile(wb,"LinenMark_заказ.xlsx");
     showToast("LinenMark экспорт готов","ok");
